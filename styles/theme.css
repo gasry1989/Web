@@ -1,0 +1,24 @@
+/* 主题变量补充与暗色主题延展（可后续添加暗黑/亮色切换） */
+:root {
+  --color-scroll-thumb:#33424d;
+  --color-scroll-track:#141b20;
+  --color-focus-ring:rgba(18,153,248,.35);
+}
+::-webkit-scrollbar {
+  width:8px;
+  height:8px;
+}
+::-webkit-scrollbar-track {
+  background:var(--color-scroll-track);
+}
+::-webkit-scrollbar-thumb {
+  background:var(--color-scroll-thumb);
+  border-radius:4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background:#415464;
+}
+.focus-ring:focus {
+  outline:none;
+  box-shadow:0 0 0 2px var(--color-focus-ring);
+}

@@ -1,0 +1,14 @@
+/* 表格组件细化样式，独立便于按需裁剪 */
+.data-table thead th {
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:#1f2a32;
+}
+.data-table tbody tr.selected {
+  background:#25323b;
+}
+.data-table td .dot { vertical-align:middle; }
+.data-table .btn-xs {
+  margin:0 2px;
+}

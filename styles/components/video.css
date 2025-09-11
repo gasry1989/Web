@@ -1,0 +1,9 @@
+/* 可选：若引入请在 index.html link 引入 */
+.rtc-video-el {
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  background:#000;
+  border:1px solid #2e3a44;
+  border-radius:4px;
+}

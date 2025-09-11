@@ -1,0 +1,19 @@
+/* 表单与验证提示 */
+input:invalid, select:invalid, textarea:invalid {
+  /* 仅提交后再通过 JS 添加一个类 .form-submitted 来真正显示错误边框 */
+}
+.form-vertical.form-submitted input:invalid,
+.form-vertical.form-submitted select:invalid,
+.form-vertical.form-submitted textarea:invalid {
+  border-color:var(--color-danger);
+}
+.inline-error {
+  font-size:11px;
+  color:var(--color-danger);
+  margin-top:3px;
+}
+.flex-3 {
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+}
