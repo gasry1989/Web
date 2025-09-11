@@ -136,6 +136,7 @@ function onSubmit(e) {
       msgEl.textContent = (err && err.msg) || '登录失败';
       msgEl.classList.add('err');
       generateCaptcha();
+      console.log('err: '+err+' err.msg:'+err.msg);
     })
     .finally(() => {
       btn.disabled = false;

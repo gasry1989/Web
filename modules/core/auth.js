@@ -2,7 +2,7 @@ import { createStore } from '@core/store.js';
 import { eventBus } from '@core/eventBus.js';
 import { httpPost } from '@core/http.js';
 import { apiPath } from '@core/apiCatalog.js';
-import { sha256Hex } from '@utils/hash.js';
+import { sha256Hex } from '@utils/hash.js'; // 已实现 WebCrypto + fallback
 
 const LS_TOKEN = 'APP_TOKEN';
 const LS_USER  = 'APP_USER';
@@ -31,6 +31,7 @@ export function authRequireGuard() {
 }
 
 export async function authLogin(account, rawPwd) {
+  // 方案2：sha256Hex 内部自动区分安全上下文或 fallback
   const hashed = await sha256Hex(rawPwd);
   const data = await httpPost(apiPath('3.1'), {
     userAccount: account,
