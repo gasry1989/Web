@@ -11,12 +11,16 @@ import { authState } from '@core/auth.js';
 
 let modalRef = null;
 
+// 替换原来的 showPasswordModal 函数
+// 2. 替换原 showPasswordModal（仅增加 ensurePasswordModalStyle 调用，其他逻辑保持）
 export function showPasswordModal(user) {
+  ensurePasswordModalStyle();  // 新增调用：注入样式
+
   const exist = getModal('passwordModal');
   if (exist) { exist.open(); return; }
 
   const current = authState.get().userInfo;
-  const selfChange = current && current.userId === user.userId; // 仅本人修改自己
+  const selfChange = current && current.userId === user.userId;
 
   const content = document.createElement('div');
   content.className = 'password-modal';
@@ -29,7 +33,6 @@ export function showPasswordModal(user) {
     content,
     footerButtons: []
   });
-
   if (!modalRef) return;
 
   const form = modalRef.body.querySelector('#pwdForm');
@@ -45,24 +48,33 @@ export function showPasswordModal(user) {
     btn.addEventListener('click', () => toggleVisibility(btn));
   });
 
-  const genBtn = form.querySelector('#btnGenPwd');
+  const genBtn  = form.querySelector('#btnGenPwd');
   const copyBtn = form.querySelector('#btnCopyPwd');
 
-  genBtn.addEventListener('click', () => {
+  genBtn.addEventListener('click', async () => {
     const newPwd = generateStrongPassword(12);
     pwd1.value = newPwd;
     pwd2.value = newPwd;
     triggerValidate();
-    copyToClipboard(newPwd);
-    eventBus.emit('toast:show', { type:'info', message:'已生成并复制' });
+    try {
+      await copyToClipboard(newPwd);
+      eventBus.emit('toast:show', { type:'info', message:'已生成并复制' });
+    } catch {
+      eventBus.emit('toast:show', { type:'warn', message:'已生成，复制失败，请手动复制' });
+    }
   });
-  copyBtn.addEventListener('click', () => {
+
+  copyBtn.addEventListener('click', async () => {
     if (!pwd1.value) {
       eventBus.emit('toast:show', { type:'warn', message:'无可复制密码' });
       return;
     }
-    copyToClipboard(pwd1.value);
-    eventBus.emit('toast:show', { type:'success', message:'已复制密码' });
+    try {
+      await copyToClipboard(pwd1.value);
+      eventBus.emit('toast:show', { type:'success', message:'已复制密码' });
+    } catch {
+      eventBus.emit('toast:show', { type:'error', message:'复制失败，请手动复制' });
+    }
   });
 
   pwd1.addEventListener('input', triggerValidate);
@@ -76,11 +88,8 @@ export function showPasswordModal(user) {
   form.addEventListener('submit', e => {
     e.preventDefault();
     if (submitBtn.disabled) return;
-
     const newPwd = pwd1.value.trim();
     const oldPwdVal = oldPwd ? oldPwd.value.trim() : '';
-
-    // 组装 3.12 payload：只有 selfChange 时才传 oldpwd
     apiUserChangePassword(user.userId, newPwd, selfChange ? { oldPwd: oldPwdVal } : {})
       .then(() => {
         eventBus.emit('toast:show', { type:'success', message:'密码已更新' });
@@ -103,7 +112,6 @@ export function showPasswordModal(user) {
     tipsEl.className = 'pwd-inline-msg ' + (ok ? 'ok' : 'err');
     submitBtn.disabled = !ok;
   }
-
   function renderStrength(score, level) {
     const percent = Math.min(100, Math.round(score));
     strengthBar.style.width = percent + '%';
@@ -111,8 +119,51 @@ export function showPasswordModal(user) {
     strengthLabel.textContent = level ? level.toUpperCase() : '';
   }
 }
-
+// 1. 新增：样式注入（若你已有类似函数，可直接把 CSS 合并）
+function ensurePasswordModalStyle() {
+  if (document.getElementById('pwd-modal-inline-style')) return;
+  const css = `
+  /* ===== PasswordModal inline (eye on left) ===== */
+  .password-modal .pwd-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .password-modal .pwd-field input {
+    width: 100%;
+    box-sizing: border-box;
+    padding-left: 34px; /* 预留左侧图标空间 */
+  }
+  .password-modal .pwd-field .pwd-eye {
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+  }
+  .password-modal .pwd-field .pwd-eye:focus {
+    outline: 1px solid #3a87ff;
+    border-radius: 4px;
+  }
+  /* 若外层有 with-actions 布局，不影响原有按钮组 */
+  `;
+  const style = document.createElement('style');
+  style.id = 'pwd-modal-inline-style';
+  style.textContent = css;
+  document.head.appendChild(style);
+}
 /* ---------- HTML 模板 ---------- */
+// 3. 替换 buildHTML（按钮放到输入框左侧，顺序：button + input）
 function buildHTML(user, selfChange) {
   return `
     <form id="pwdForm" autocomplete="off">
@@ -127,8 +178,8 @@ function buildHTML(user, selfChange) {
       <div class="form-item">
         <label class="form-label">旧密码 <span class="req">*</span></label>
         <div class="form-field pwd-field">
-          <input type="password" name="oldpwd" placeholder="输入当前密码" minlength="1" autocomplete="current-password" required />
           <button type="button" class="pwd-eye" title="显示/隐藏">👁</button>
+          <input type="password" name="oldpwd" placeholder="输入当前密码" minlength="1" autocomplete="current-password" required />
         </div>
       </div>` : '' }
 
@@ -136,8 +187,8 @@ function buildHTML(user, selfChange) {
         <label class="form-label">新密码 <span class="req">*</span></label>
         <div class="form-field with-actions">
           <div class="pwd-field">
-            <input type="password" name="pwd1" placeholder="至少8位，含2种类别" minlength="8" autocomplete="new-password" required />
             <button type="button" class="pwd-eye" title="显示/隐藏">👁</button>
+            <input type="password" name="pwd1" placeholder="至少8位，含2种类别" minlength="8" autocomplete="new-password" required />
           </div>
           <div class="pwd-mini-actions">
             <button type="button" class="btn btn-xs" id="btnGenPwd" title="生成随机强密码">生成</button>
@@ -155,8 +206,8 @@ function buildHTML(user, selfChange) {
       <div class="form-item">
         <label class="form-label">确认密码 <span class="req">*</span></label>
         <div class="form-field pwd-field">
-          <input type="password" name="pwd2" placeholder="再次输入新密码" minlength="8" autocomplete="new-password" required />
           <button type="button" class="pwd-eye" title="显示/隐藏">👁</button>
+          <input type="password" name="pwd2" placeholder="再次输入新密码" minlength="8" autocomplete="new-password" required />
         </div>
       </div>
 
@@ -246,18 +297,48 @@ function generateStrongPassword(len=12) {
   return base.join('');
 }
 
+// 替换原来的 copyToClipboard 函数
 function copyToClipboard(text) {
-  try { navigator.clipboard?.writeText(text); }
-  catch(e) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position='fixed';
-    ta.style.left='-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); } catch(_) {}
-    ta.remove();
-  }
+  return new Promise(async (resolve, reject) => {
+    // 首选异步 API
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return resolve(true);
+      } catch (e) {
+        // 继续走降级
+      }
+    }
+    // 降级 execCommand
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      document.body.appendChild(ta);
+
+      const selection = document.getSelection();
+      const originalRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+      ta.select();
+      const ok = document.execCommand('copy');
+
+      if (originalRange && selection) {
+        selection.removeAllRanges();
+        selection.addRange(originalRange);
+      } else {
+        window.getSelection()?.removeAllRanges();
+      }
+
+      ta.remove();
+      if (ok) return resolve(true);
+      return reject(new Error('execCommand copy failed'));
+    } catch (err) {
+      return reject(err);
+    }
+  });
 }
 
 function escapeHTML(str='') {

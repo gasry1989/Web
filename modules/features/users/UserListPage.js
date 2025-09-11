@@ -42,8 +42,8 @@ export function mountUserListPage() {
               <th>在线</th>
               <th>上级账号</th>
               <th>上级名称</th>
-              <th>总帐号</th>
-              <th>总帐号名称</th>
+              <th>创建者帐号</th>
+              <th>创建者名称</th>
               <th>所属地区</th>
               <th>创建时间</th>
               <th>备注</th>
