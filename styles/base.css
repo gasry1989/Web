@@ -345,8 +345,7 @@ input:focus,select:focus,textarea:focus {
 .ov-section label { font-weight:600; display:inline-flex; align-items:center; gap:4px; }
 .ov-actions { display:flex; gap:8px; }
 
-.login-page { max-width:360px; margin:60px auto; background:#151d23; padding:24px 26px; border:1px solid var(--color-border); border-radius:8px; }
-.login-page h2 { margin:0 0 20px; font-size:20px; }
+
 .form-vertical label { display:flex; flex-direction:column; font-size:12px; gap:4px; margin-bottom:10px; }
 
 .modal-backdrop {

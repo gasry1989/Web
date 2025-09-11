@@ -5,6 +5,7 @@ import { renderHeaderUserMount } from '@core/renderHeaderMount.js';
 import { eventBus } from '@core/eventBus.js';
 import { authState } from '@core/auth.js';
 import { showToast } from '@ui/toast.js';
+import { initSidebarToggle } from '@layout/SidebarToggle.js';
 
 // 初始化基础（加载 token / 侧栏 / 预览容量）
 initApp();
@@ -14,6 +15,8 @@ renderHeaderUserMount();
 
 // 初始化路由（含登录守卫）
 initRouter();
+
+initSidebarToggle(); // 全局初始化一次
 
 // 全局 toast 事件
 eventBus.on('toast:show', p => showToast(p));

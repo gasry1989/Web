@@ -1,8 +1,7 @@
 /**
- * 设备概览 (宽度改为 80% 视口宽度 + 异步刷新无闪烁版本)
- * 说明：
- *  - width: 80vw，最大 1600，可按需改 MAX_WIDTH
- *  - 其余逻辑同上一个异步刷新版本
+ * 设备概览（分页始终显示）
+ *  - 固定高度样式依赖 device-overview-fixed.css
+ *  - 分页即便只有 1 页也显示 prev 1 next
  */
 
 import { createModal, getModal } from '@ui/modal.js';
@@ -45,28 +44,30 @@ export function showDeviceOverviewModal(opt={}) {
 
 function createAndOpen() {
   const content = document.createElement('div');
-  content.className = 'device-overview';
+  content.className = 'device-overview dv-fixed';
   content.innerHTML = `
     <div class="dev-toolbar">
       <div class="dev-actions">
-        <button class="btn btn-sm" id="btnDevRefresh">刷新</button>
+        <button class="btn btn-sm" id="btnDevRefresh" title="刷新列表">刷新</button>
       </div>
     </div>
-    <div class="table-wrapper">
+    <div class="dev-table-area">
       <table class="data-table dev-table">
         <thead>
           <tr>${COL_MAP.map(c=>`<th>${c.title}</th>`).join('')}</tr>
         </thead>
-        <tbody class="dev-tbody">
-          ${renderLoadingRow()}
-        </tbody>
+        <tbody class="dev-tbody">${renderLoadingRow()}</tbody>
       </table>
+      <div class="dev-overlay-loading" style="display:none;" id="devLoadingMask">
+        <div class="spinner"></div>
+      </div>
     </div>
-    <div class="pagination dev-pager"><span class="pg-info">加载中...</span></div>
+    <div class="dev-footer-bar">
+      <div class="dev-pager" id="devPager"></div>
+    </div>
   `;
 
   const width = Math.min(Math.floor(window.innerWidth * 0.8), MAX_WIDTH);
-
   modalRef = createModal({
     id:'deviceOverviewModal',
     title:'设备概览',
@@ -88,17 +89,17 @@ function onResize() {
   const m = getModal('deviceOverviewModal');
   if (!m) return;
   const width = Math.min(Math.floor(window.innerWidth * 0.8), MAX_WIDTH);
-  // createModal 若支持 setWidth，可调用；没有则直接修改 DOM（假设 modal 外层有 .modal-dialog 或 body.parentNode)
   m.el.style.width = width + 'px';
 }
 
 function loadPage(pageIndex, { silentLoading }) {
   if (state.loading) return;
   state.loading = true;
-
-  if (modalRef && !silentLoading) {
+  const mask = modalRef?.body.querySelector('#devLoadingMask');
+  if (mask && !silentLoading) mask.style.display = 'flex';
+  if (silentLoading && modalRef) {
     const tbody = modalRef.body.querySelector('.dev-tbody');
-    tbody.insertAdjacentHTML('afterbegin', renderInlineLoadingTr());
+    tbody.innerHTML = renderLoadingRow();
   }
 
   apiDeviceList({
@@ -123,13 +124,11 @@ function loadPage(pageIndex, { silentLoading }) {
     if (modalRef) {
       const tbody = modalRef.body.querySelector('.dev-tbody');
       tbody.innerHTML = `<tr><td colspan="${COL_MAP.length}" class="center text-error">${escapeHTML(err?.msg || '加载失败')}</td></tr>`;
-      modalRef.body.querySelector('.dev-pager').innerHTML = '';
+      modalRef.body.querySelector('#devPager').innerHTML = '';
     }
   }).finally(() => {
     state.loading = false;
-    if (modalRef) {
-      modalRef.body.querySelectorAll('.row-inline-loading').forEach(r => r.remove());
-    }
+    if (mask) mask.style.display = 'none';
   });
 }
 
@@ -148,12 +147,9 @@ function renderTable() {
 function renderPager() {
   if (!modalRef) return;
   const { pageIndex, pageTotal, total } = state.listInfo;
-  if (pageTotal <= 1) {
-    modalRef.body.querySelector('.dev-pager').innerHTML = `<span class="pg-info">共 ${total} 条</span>`;
-    return;
-  }
   const pages = buildPageWindow(pageIndex, pageTotal, 2);
-  const pagerEl = modalRef.body.querySelector('.dev-pager');
+  const pagerEl = modalRef.body.querySelector('#devPager');
+  // 始终显示分页结构
   pagerEl.innerHTML = `
     <button class="pg-btn" data-pg="prev" ${pageIndex===1?'disabled':''}>&lt;</button>
     ${pages.map(p=>`<button class="pg-btn ${p===pageIndex?'active':''}" data-pg="${p}">${p}</button>`).join('')}
@@ -164,8 +160,8 @@ function renderPager() {
     btn.addEventListener('click', () => {
       const val = btn.getAttribute('data-pg');
       let target = pageIndex;
-      if (val === 'prev') target = pageIndex - 1;
-      else if (val === 'next') target = pageIndex + 1;
+      if (val==='prev') target = pageIndex - 1;
+      else if (val==='next') target = pageIndex + 1;
       else target = Number(val);
       if (target < 1 || target > pageTotal) return;
       loadPage(target, { silentLoading:false });
@@ -176,11 +172,8 @@ function renderPager() {
 function renderLoadingRow() {
   return `<tr><td colspan="${COL_MAP.length}" class="center">加载中...</td></tr>`;
 }
-function renderInlineLoadingTr() {
-  return `<tr class="row-inline-loading"><td colspan="${COL_MAP.length}" class="center slim-loading">加载中...</td></tr>`;
-}
 
-/* ---- 数据标准化 ---- */
+/* ---- 标准化 ---- */
 function normalizeItem(raw) {
   const di = raw?.devInfo || {};
   const ui = raw?.userInfo || {};

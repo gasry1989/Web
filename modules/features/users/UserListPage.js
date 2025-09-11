@@ -1,13 +1,8 @@
 /**
- * 用户管理页面 (UserListPage)
- * 功能：
- *  - 加载用户列表 (接口 3.11)
- *  - 分页
- *  - 多选删除 (接口 3.24)
- *  - 添加用户 / 修改信息 / 修改密码 / 角色权限矩阵 / 设备概览
- *
- * 注意：
- *  - 设备相关接口放在 @api/deviceApi.js
+ * 用户管理页面
+ * 变更：
+ *  - 移除标题栏内折叠按钮（只保留侧栏自身按钮）
+ *  - 其它逻辑保持
  */
 
 import { userState } from '@state/userState.js';
@@ -16,11 +11,12 @@ import { apiUserList, apiUserDelete, apiRoleList } from '@api/userApi.js';
 import { buildPageWindow } from '@core/pagination.js';
 import { eventBus } from '@core/eventBus.js';
 import { hasModifyRolePermission } from '@utils/permissions.js';
+import { initSidebarToggle } from '@layout/SidebarToggle.js';
 
 let rootEl = null;
 let unsubscribe = null;
 
-function mountUserListPage() {
+export function mountUserListPage() {
   console.debug('[UserListPage] mount');
   const main = document.getElementById('mainView');
   if (!main) {
@@ -29,12 +25,12 @@ function mountUserListPage() {
   }
 
   main.innerHTML = `
-    <div class="page users-page">
+    <div class="page users-page users-page-wrapper">
       <div class="page-title-bar">
         <h2>用户管理</h2>
         <div class="actions" id="userActions"></div>
       </div>
-      <div class="table-wrapper">
+      <div class="table-wrapper user-table-wrapper">
         <table class="data-table" id="userTable">
           <thead>
             <tr>
@@ -57,23 +53,24 @@ function mountUserListPage() {
           <tbody id="userTableBody"></tbody>
         </table>
       </div>
-      <div class="pagination" id="userPagination"></div>
+      <div class="pagination pagination-fixed" id="userPagination"></div>
     </div>
   `;
   rootEl = main.querySelector('.users-page');
+
+  // 初始化单一侧栏折叠按钮
+  initSidebarToggle();
 
   bindGlobalActions();
   subscribeState();
   loadUserPage(1);
 
   return () => {
-    console.debug('[UserListPage] unmount (returned fn)');
     unsubscribe && unsubscribe();
   };
 }
 
-function unmountUserListPage() {
-  console.debug('[UserListPage] unmountUserListPage (router)');
+export function unmountUserListPage() {
   unsubscribe && unsubscribe();
 }
 
@@ -90,11 +87,7 @@ function loadUserPage(pageIndex) {
         pageSize: listInfo.pageSize,
         pageTotal: Math.max(1, Math.ceil(list.length / listInfo.pageSize))
       };
-      userState.set({
-        loading: false,
-        list,
-        listInfo: li
-      });
+      userState.set({ loading:false, list, listInfo: li });
     })
     .catch(err => {
       console.error('[UserListPage] loadUserPage error', err);
@@ -106,11 +99,10 @@ function loadUserPage(pageIndex) {
 function subscribeState() {
   unsubscribe = userState.subscribe(renderAll);
 }
-
-function renderAll(state) {
+function renderAll(s) {
   if (!rootEl) return;
-  renderTable(state);
-  renderPagination(state);
+  renderTable(s);
+  renderPagination(s);
 }
 
 function renderTable(state) {
@@ -126,8 +118,8 @@ function renderTable(state) {
         <td>${escapeHTML(u.roleName || '')}</td>
         <td>${escapeHTML(u.userName || '')}</td>
         <td>${u.onlineState
-            ? '<span class="dot dot-green" title="在线"></span>'
-            : '<span class="dot dot-gray" title="离线"></span>'}
+          ? '<span class="dot dot-green" title="在线"></span>'
+          : '<span class="dot dot-gray" title="离线"></span>'}
         </td>
         <td>${escapeHTML(u.parentUserAccount || '')}</td>
         <td>${escapeHTML(u.parentUserName || '')}</td>
@@ -144,24 +136,22 @@ function renderTable(state) {
     `;
   }).join('');
 
-  // 复选
   tbody.querySelectorAll('input[type=checkbox][data-id]').forEach(chk => {
     chk.addEventListener('change', () => {
       const id = Number(chk.getAttribute('data-id'));
       const sel = new Set(userState.get().selection);
-      if (chk.checked) sel.add(id); else sel.delete(id);
+      chk.checked ? sel.add(id) : sel.delete(id);
       userState.set({ selection: sel });
     });
   });
 
-  // 行按钮事件委托
-  tbody.addEventListener('click', onRowButtonClick, { once: true });
+  tbody.addEventListener('click', onRowButtonClick, { once:true });
 }
 
 function onRowButtonClick(e) {
   const btn = e.target.closest('button[data-op]');
   if (!btn) {
-    e.currentTarget.addEventListener('click', onRowButtonClick, { once: true });
+    e.currentTarget.addEventListener('click', onRowButtonClick, { once:true });
     return;
   }
   const op = btn.getAttribute('data-op');
@@ -170,7 +160,7 @@ function onRowButtonClick(e) {
   if (!user) return;
   if (op === 'edit') openEditUserModal(user);
   if (op === 'pwd') openPasswordModal(user);
-  e.currentTarget.addEventListener('click', onRowButtonClick, { once: true });
+  e.currentTarget.addEventListener('click', onRowButtonClick, { once:true });
 }
 
 function renderPagination(state) {
@@ -178,16 +168,16 @@ function renderPagination(state) {
   const { pageIndex, pageTotal } = state.listInfo;
   const pages = buildPageWindow(pageIndex, pageTotal, 2);
   pager.innerHTML = `
-    <button class="pg-btn" data-pg="prev" ${pageIndex === 1 ? 'disabled' : ''}>&lt;</button>
+    <button class="pg-btn" data-pg="prev" ${pageIndex===1?'disabled':''}>&lt;</button>
     ${pages.map(p => `<button class="pg-btn ${p===pageIndex?'active':''}" data-pg="${p}">${p}</button>`).join('')}
-    <button class="pg-btn" data-pg="next" ${pageIndex === pageTotal ? 'disabled' : ''}>&gt;</button>
+    <button class="pg-btn" data-pg="next" ${pageIndex===pageTotal?'disabled':''}>&gt;</button>
   `;
   pager.querySelectorAll('.pg-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const val = btn.getAttribute('data-pg');
       let target = pageIndex;
-      if (val === 'prev') target = pageIndex - 1;
-      else if (val === 'next') target = pageIndex + 1;
+      if (val==='prev') target = pageIndex - 1;
+      else if (val==='next') target = pageIndex + 1;
       else target = Number(val);
       if (target < 1 || target > pageTotal) return;
       loadUserPage(target);
@@ -195,7 +185,7 @@ function renderPagination(state) {
   });
 }
 
-/* ---------------- 顶部操作区 ---------------- */
+/* ---------------- 操作区 ---------------- */
 function bindGlobalActions() {
   const actionsEl = rootEl.querySelector('#userActions');
   const roleId = authState.get().userInfo?.roleId;
@@ -240,28 +230,16 @@ function deleteSelectedUsers() {
   });
 }
 
-/* ---------------- 动态 import 弹窗 ---------------- */
-function openAddUserModal() {
-  import('./modals/AddUserModal.js').then(m => m.showAddUserModal());
-}
-function openEditUserModal(user) {
-  import('./modals/EditUserModal.js').then(m => m.showEditUserModal(user));
-}
-function openPasswordModal2(user) {
-  import('./modals/PasswordModal.js').then(m => m.showPasswordModal(user));
-}
+/* ---------------- 动态 import ---------------- */
+function openAddUserModal() { import('./modals/AddUserModal.js').then(m => m.showAddUserModal()); }
+function openEditUserModal(user) { import('./modals/EditUserModal.js').then(m => m.showEditUserModal(user)); }
 function openPasswordModal(user) {
   import('./modals/PasswordModal.js').then(m => m.showPasswordModal(user))
-    .catch(err => {
-      console.error('[UserListPage] open password modal failed', err);
-    });
+    .catch(err => console.error('[UserListPage] open password modal failed', err));
 }
 function openDeviceOverview() {
-  // 新增：把当前选中的用户ID传给 3.10 接口 userIds
   const sel = Array.from(userState.get().selection);
-  import('./modals/DeviceOverviewModal.js').then(m =>
-    m.showDeviceOverviewModal({ userIds: sel.length ? sel : [] })
-  );
+  import('./modals/DeviceOverviewModal.js').then(m => m.showDeviceOverviewModal({ userIds: sel.length?sel:[] }));
 }
 function openRoleMatrixPanel() {
   apiRoleList().then(data => {
@@ -269,7 +247,7 @@ function openRoleMatrixPanel() {
   });
 }
 
-/* ---------------- 工具函数 ---------------- */
+/* ---------------- 工具 ---------------- */
 function escapeHTML(str='') {
   return str.replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -282,5 +260,3 @@ function formatTime(ts) {
   const p = n => n<10?'0'+n:n;
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
-
-export { mountUserListPage, unmountUserListPage };
