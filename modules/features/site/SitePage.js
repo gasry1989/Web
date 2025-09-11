@@ -604,9 +604,19 @@ function renderSummary(sum) {
 function renderNotifications(list) {
   const el = document.getElementById('notifyList');
   if (!el) return;
-  el.innerHTML = list.map(l => `<div class="notify-item">${formatTime(l.time)} ${l.uid} ${l.online ? '上线' : '下线'}</div>`).join('');
+  el.innerHTML = list.map(l => {
+    // 3.21 接口新增 uname，优先显示；兼容旧数据回退 uid
+    const displayName = l.uname || l.uid;
+    return `<div class="notify-item">${formatTime(l.time)} ${escapeHTML(String(displayName))} ${l.online ? '上线' : '下线'}</div>`;
+  }).join('');
 }
 
+// 若文件中尚无 escapeHTML 工具，请追加；已有则可忽略
+function escapeHTML(str='') {
+  return str.replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
 /* ------- 工具函数 ------- */
 function rand(a,b){return Math.random()*(b-a)+a;}
 function randInt(a,b){return Math.floor(Math.random()*(b-a+1))+a;}

@@ -2,51 +2,39 @@ import { httpPost } from '@core/http.js';
 import { apiPath } from '@core/apiCatalog.js';
 
 /**
- * 3.10 获取设备列表 /api/web/dev/list
- * 支持分页 + 过滤（按需扩展）
- * 后端若不需要的字段可忽略；保留统一字段名方便前端调用。
- *
- * @param {Object} opt
- *  - pageIndex
- *  - pageSize
- *  - userId         (按所属用户过滤；0 或不传表示全部)
- *  - devType        (设备类型过滤)
- *  - devMode        (设备模式过滤)
- *  - searchStr      (模糊搜索编号/名称)
- *  - filterOnline   (是否只看在线 true/false)
+ * 3.10 获取设备列表（按用户）
+ * payload:
+ *  {
+ *    userIds?: number[]    // 为空或不传：当前用户及所有后代；有值：这些用户及其所有后代
+ *    pageIndex: number
+ *    pageSize: number
+ *  }
  */
-export function apiDeviceList(opt = {}) {
+export function apiDeviceList(options = {}) {
   const {
+    userIds = [],
     pageIndex = 1,
-    pageSize = 10,
-    userId = 0,
-    devType = 0,
-    devMode = 0,
-    searchStr = '',
-    filterOnline = false
-  } = opt;
+    pageSize = 10
+  } = options;
 
-  return httpPost(apiPath('3.10'), {
+  const payload = {
     pageIndex,
-    pageSize,
-    userId,
-    devType,
-    devMode,
-    filterStr: searchStr,
-    filterOnline: !!filterOnline
-  });
+    pageSize
+  };
+  if (Array.isArray(userIds) && userIds.length) {
+    payload.userIds = userIds;
+  }
+  return httpPost(apiPath('3.10'), payload);
 }
 
 /**
- * (保留) 3.20 设备汇总 /api/web/dev/summary_list
- * 某些其它页面可能仍在使用。
+ * 3.20 汇总 (其它页面仍可能用到)
  */
 export function apiDeviceSummary(pageIndex = 1, pageSize = 10) {
   return httpPost(apiPath('3.20'), { pageIndex, pageSize });
 }
 
-/* 其余接口保持原实现 */
-
+/* 其余接口保持原有 */
 export function apiDevTypes() {
   return httpPost(apiPath('3.13'), {});
 }

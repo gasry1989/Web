@@ -47,3 +47,21 @@ export function apiUserDelete(userIds) {
 export function apiDeviceOverview(pageIndex = 1, pageSize = 50) {
   return httpPost(apiPath('3.10'), { pageIndex, pageSize, userIds: [] });
 }
+/**
+ * 3.12 修改密码
+ * @param {number} userId 目标用户ID
+ * @param {string} newPwd 新密码
+ * @param {object} opts   { oldPwd?: string } 只有当前用户自己改密码时需要
+ */
+export function apiUserChangePassword(userId, newPwd, opts = {}) {
+  const payload = {
+    userInfo: {
+      userId,
+      newpwd: newPwd
+    }
+  };
+  if (opts.oldPwd) {
+    payload.userInfo.oldpwd = opts.oldPwd;
+  }
+  return httpPost(apiPath('3.12'), payload);
+}

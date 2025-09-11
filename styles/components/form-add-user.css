@@ -121,4 +121,9 @@
   .add-user-form .form-item-inline .form-field.three-cols {
     flex-direction: column;
   }
+  .add-user-form .hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #76818c;
+}
 }

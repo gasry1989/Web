@@ -7,8 +7,7 @@
  *  - 添加用户 / 修改信息 / 修改密码 / 角色权限矩阵 / 设备概览
  *
  * 注意：
- *  - 设备相关接口请放在 @api/deviceApi.js，勿放这里
- *  - 本文件只导出 mountUserListPage / unmountUserListPage
+ *  - 设备相关接口放在 @api/deviceApi.js
  */
 
 import { userState } from '@state/userState.js';
@@ -21,10 +20,6 @@ import { hasModifyRolePermission } from '@utils/permissions.js';
 let rootEl = null;
 let unsubscribe = null;
 
-/**
- * 挂载页面
- * @returns {Function} 卸载函数
- */
 function mountUserListPage() {
   console.debug('[UserListPage] mount');
   const main = document.getElementById('mainView');
@@ -77,16 +72,12 @@ function mountUserListPage() {
   };
 }
 
-/**
- * 路由卸载调用（与返回的卸载函数功能一致，保持兼容）
- */
 function unmountUserListPage() {
   console.debug('[UserListPage] unmountUserListPage (router)');
   unsubscribe && unsubscribe();
 }
 
-/* -------------------- 数据加载 -------------------- */
-
+/* ---------------- 数据加载 ---------------- */
 function loadUserPage(pageIndex) {
   const { listInfo } = userState.get();
   userState.set({ loading: true });
@@ -111,8 +102,7 @@ function loadUserPage(pageIndex) {
     });
 }
 
-/* -------------------- 状态订阅与渲染 -------------------- */
-
+/* ---------------- 状态订阅与渲染 ---------------- */
 function subscribeState() {
   unsubscribe = userState.subscribe(renderAll);
 }
@@ -205,8 +195,7 @@ function renderPagination(state) {
   });
 }
 
-/* -------------------- 顶部操作区 -------------------- */
-
+/* ---------------- 顶部操作区 ---------------- */
 function bindGlobalActions() {
   const actionsEl = rootEl.querySelector('#userActions');
   const roleId = authState.get().userInfo?.roleId;
@@ -251,19 +240,28 @@ function deleteSelectedUsers() {
   });
 }
 
-/* -------------------- 动态 import 弹窗 -------------------- */
-
+/* ---------------- 动态 import 弹窗 ---------------- */
 function openAddUserModal() {
   import('./modals/AddUserModal.js').then(m => m.showAddUserModal());
 }
 function openEditUserModal(user) {
   import('./modals/EditUserModal.js').then(m => m.showEditUserModal(user));
 }
-function openPasswordModal(user) {
+function openPasswordModal2(user) {
   import('./modals/PasswordModal.js').then(m => m.showPasswordModal(user));
 }
+function openPasswordModal(user) {
+  import('./modals/PasswordModal.js').then(m => m.showPasswordModal(user))
+    .catch(err => {
+      console.error('[UserListPage] open password modal failed', err);
+    });
+}
 function openDeviceOverview() {
-  import('./modals/DeviceOverviewModal.js').then(m => m.showDeviceOverviewModal());
+  // 新增：把当前选中的用户ID传给 3.10 接口 userIds
+  const sel = Array.from(userState.get().selection);
+  import('./modals/DeviceOverviewModal.js').then(m =>
+    m.showDeviceOverviewModal({ userIds: sel.length ? sel : [] })
+  );
 }
 function openRoleMatrixPanel() {
   apiRoleList().then(data => {
@@ -271,8 +269,7 @@ function openRoleMatrixPanel() {
   });
 }
 
-/* -------------------- 工具函数 -------------------- */
-
+/* ---------------- 工具函数 ---------------- */
 function escapeHTML(str='') {
   return str.replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -286,5 +283,4 @@ function formatTime(ts) {
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-/* 统一导出，避免重复导出错误 */
 export { mountUserListPage, unmountUserListPage };
