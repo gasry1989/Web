@@ -1,23 +1,14 @@
 /**
- * 现场管理主页面：
- * - 地图初始化（高德）
- * - 设备树构建（用户树 + 设备，树型结构）
- * - 可拖拽调整左侧树栏宽度（带本地记忆）
- * - 过滤 + 刷新 + 统计 + 通知列表
- * - 设备详情浮层 + 预览窗口管理
- * - 模式数据模拟
- *
- * 变更要点（根据你的要求）：
- * 1) 树根只显示“当前登录用户 本人 + 角色名”，不再出现“用户”字样，也不重复出现同名根节点。
- *    - 角色名优先使用 currentUser.roleName；否则按 roleId 映射：0 管理员，1 总帐号，2 子帐号，3 测试人员。
- * 2) 去掉用户行右侧数字徽章；设备行去掉灰点。
- * 3) 在线为白色，离线为灰色。在线判断直接使用接口返回的 onlineState：
- *    - 用户：userInfo.onlineState（若缺失则回退按子节点/设备聚合）
- *    - 设备：devInfo.onlineState
- * 4) 地图在离开“现场管理”（hash 不包含 /site）时自动销毁，关闭地图浮层；返回后自动重新创建地图。
+ * 现场管理主页面（无整页垂直滚动 + 地图 InfoWindow 锚定 + 底部四宫格）
+ * - 页面禁止出现全局垂直滚动条：html/body 以及组件容器均 overflow hidden；树/通知内部可滚动
+ * - 上半区：地图（左） + 状态/通知（右）
+ * - 下半区：四宫格媒体（视频/模式）
+ * - 地图悬浮窗：使用 AMap.InfoWindow({isCustom:true})，锚定设备经纬度，随地图移动
+ * - 视频播放：SRS WebRTC，固定地址 webrtc://media.szdght.com/1/camera_audio（参考 rtc_player7.html 的 video+canvas 渲染）
+ * - 切换路由离开“现场管理”（hash 不含 /site）时销毁地图与媒体；返回后稳妥重建
  */
 import { siteState } from '@state/siteState.js';
-import { previewState, computePreviewCapacity } from '@state/previewState.js';
+import { previewState } from '@state/previewState.js';
 import {
   apiDevTypes,
   apiDevModes,
@@ -31,65 +22,94 @@ import { eventBus } from '@core/eventBus.js';
 import { ENV } from '@config/env.js';
 import { ensureWS } from '@ws/wsClient.js';
 
+/* ---------- 运行时变量 ---------- */
 let unsubSite;
 let unsubPreview;
-let mapInited = false;
 let mapInstance = null;
 let markersLayer = [];
 let routeWatcher = null;
 
-/* ========== 内联样式（JS 注入） ========== */
+/* InfoWindow（地图悬浮窗） */
+let infoWindow = null;
+let currentInfoDevId = null;
+
+/* 监听 mapContainer 尺寸变化 */
+let mapResizeObs = null;
+
+/* 记住 html/body 原 overflow，离开时恢复（全局禁滚） */
+let __prevHtmlOverflow = '';
+let __prevBodyOverflow = '';
+
+/* 四宫格媒体 */
+const SRS_FIXED_URL = 'webrtc://media.szdght.com/1/camera_audio';
+const mediaSlots = [
+  { idx: 0, type: null, player: null, node: null, title: '', timer: null },
+  { idx: 1, type: null, player: null, node: null, title: '', timer: null },
+  { idx: 2, type: null, player: null, node: null, title: '', timer: null },
+  { idx: 3, type: null, player: null, node: null, title: '', timer: null },
+];
+
+/* ---------- 样式注入（无整页滚动，内部区滚动） ---------- */
 let __SITE_STYLE_INJECTED = false;
 const __SITE_STYLE_ID = 'sitepage-inline-style';
 function injectSiteStylesOnce() {
   if (__SITE_STYLE_INJECTED || document.getElementById(__SITE_STYLE_ID)) return;
   const css = `
-  /* 主题变量（暗色） */
   .site-page {
     --panel-bg: #0f1720;
     --panel-bg-2: #0b121a;
     --panel-line: rgba(255,255,255,0.08);
     --text-primary: #cfd8dc;
     --text-dim: #9fb1bb;
-    --chip-hover: #15202b;
-    --toggle-color: #9fb1bb;
-    --border-dash: rgba(255,255,255,0.12);
     --online-text: #ffffff;
     --offline-text: #7a8a93;
+    --grid-border: rgba(255,0,0,.45);
   }
+  /* 组件占满视口，外层不滚动 */
+  .site-page, .site-layout { height: 100vh; overflow: hidden; }
+  .site-layout { display:flex; }
 
-  /* 整体三栏布局（左-分隔-中-右） */
-  .site-layout { display:flex; height: 100%; min-height: 100vh; }
   .site-left {
     width: var(--site-left-width, 320px);
-    min-width: 240px;
-    max-width: 50vw;
-    background: var(--panel-bg);
-    color: var(--text-primary);
-    display: flex;
-    flex-direction: column;
+    min-width: 240px; max-width: 50vw;
+    background: var(--panel-bg); color: var(--text-primary);
     border-right: 1px solid var(--panel-line);
+    display:flex; flex-direction:column;
   }
-  .site-splitter {
-    width: 6px;
-    cursor: col-resize;
-    position: relative;
-    background: transparent;
-    user-select: none;
-  }
-  .site-splitter::after {
-    content:'';
-    position:absolute; top:0; bottom:0; left:2px; width:2px;
-    background: var(--panel-line);
-    transition: background .15s ease;
-  }
-  .site-splitter:hover::after, .site-splitter.dragging::after {
-    background: rgba(93,188,252,.45);
-  }
-  .site-center { flex: 1 1 auto; background: #0a0f14; }
-  .site-right { width: 320px; max-width: 36vw; background: var(--panel-bg-2); color: var(--text-primary); border-left: 1px solid var(--panel-line); }
+  .site-splitter { width:6px; cursor:col-resize; position:relative; background:transparent; user-select:none; }
+  .site-splitter::after { content:''; position:absolute; top:0; bottom:0; left:2px; width:2px; background: var(--panel-line); transition: background .15s; }
+  .site-splitter:hover::after, .site-splitter.dragging::after { background: rgba(93,188,252,.45); }
 
-  /* 过滤条区域（暗色适配） */
+  /* 中部采用两行 grid：上自适应，下固定 260px */
+  .site-center {
+    flex:1 1 auto;
+    background:#0a0f14;
+    display:grid;
+    grid-template-rows: 1fr 260px;
+    overflow:hidden;
+  }
+
+  .top-row { display:flex; gap:10px; padding:10px; overflow:hidden; }
+  .map-wrap { flex: 1 1 auto; background:#0a0f14; border:1px solid var(--panel-line); border-radius:4px; overflow:hidden; }
+  .map-container { width: 100%; height: 100%; background:#0a0f14; }
+
+  .side-panel { width: 380px; max-width: 42vw; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
+  .panel-box { background: var(--panel-bg-2); border:1px solid var(--panel-line); border-radius:4px; padding:10px; color: var(--text-primary); display:flex; flex-direction:column; min-height:0; }
+  .panel-box h3 { margin:0 0 8px; font-size:16px; font-weight:600; }
+  .panel-scroll { flex:1 1 auto; overflow:auto; min-height:0; }
+
+  .bottom-row { padding:0 10px 10px; }
+  .media-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; height:100%; }
+  .media-cell { background:#111722; border: 2px solid var(--grid-border); border-radius:6px; display:flex; flex-direction:column; overflow:hidden; }
+  .media-head { flex: 0 0 auto; display:flex; align-items:center; justify-content:space-between; color:#cfd8dc; padding:6px 8px; font-size:12px; background:#0f1b27; border-bottom:1px solid var(--panel-line); }
+  .media-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: calc(100% - 24px); }
+  .media-close { width:20px; height:20px; border:none; color:#ccd; background:transparent; cursor:pointer; }
+  .media-close:hover { color:#fff; }
+  .media-body { position:relative; flex:1 1 auto; background:#000; display:flex; align-items:center; justify-content:center; }
+  .media-body canvas { width:100%; height:100%; display:block; }
+  .media-placeholder { color:#567; font-size:12px; }
+
+  /* 左侧过滤器与树：树内部可滚动 */
   .filters { padding: 10px 12px; border-bottom: 1px solid var(--panel-line); }
   .filters label { color: var(--text-dim); }
   .filters input, .filters select {
@@ -97,72 +117,35 @@ function injectSiteStylesOnce() {
   }
   .filters .btn { background: #122133; color: var(--text-primary); border: 1px solid var(--panel-line); }
   .filters .btn:hover { background: #17314d; }
+  .filters .only-online { text-align:left; }
+  .filters .only-online label { display:inline-flex; align-items:center; gap:6px; }
 
-  /* 仅显示在线：左对齐 */
-  .filters .only-online { text-align: left; }
-  .filters .only-online label {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    width: auto;
-    text-align: left;
-  }
-
-  /* 树容器：允许水平/垂直滚动 */
-  .device-tree {
-    flex: 1 1 auto;
-    overflow: auto;
-    color: var(--text-primary);
-    background: var(--panel-bg);
-  }
-  .gdt-tree { padding: 6px 8px; width: max-content; min-width: 100%; }
-
-  /* 树节点与样式 */
-  .gdt-node { margin-left: 0; }
-  .gdt-node + .gdt-node { margin-top: 6px; }
+  .device-tree { flex:1 1 auto; overflow:auto; color: var(--text-primary); background: var(--panel-bg); }
+  .gdt-tree { padding:6px 8px; width:max-content; min-width:100%; }
+  .gdt-node + .gdt-node { margin-top:6px; }
   .gdt-row { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; cursor:pointer; user-select:none; }
   .gdt-row:hover { background:#0e1a24; }
-  .gdt-toggle { width:16px; text-align:center; color: var(--toggle-color); }
+  .gdt-toggle { width:16px; text-align:center; color:#9fb1bb; }
   .gdt-toggle.is-empty { visibility:hidden; }
   .gdt-icon { width:14px; height:14px; display:inline-block; }
   .gdt-icon-user { background:linear-gradient(135deg,#6a8,#3a6); border-radius:50%; }
   .gdt-icon-device { background:linear-gradient(135deg,#88a,#4653d3); border-radius:3px; }
-
-  /* 在线/离线颜色：白/灰（标题和设备行） */
-  .gdt-title { flex:0 1 auto; white-space:nowrap; }
+  .gdt-title { white-space:nowrap; }
   .gdt-row.is-online .gdt-title { color: var(--online-text); }
   .gdt-row.is-offline .gdt-title { color: var(--offline-text); }
-  .gdt-node--device.is-online .gdt-title { color: var(--online-text); }
-  .gdt-node--device.is-offline .gdt-title { color: var(--offline-text); }
-
-  /* 根节点才显示角色名；其他节点不显示“用户”等字样 */
-  .gdt-role { margin-left:6px; font-size:12px; }
-  .gdt-role.role-admin{ color:#ff8a80; }
-  .gdt-role.role-tester{ color:#80d8ff; }
-  .gdt-role.role-owner{ color:#a5d6a7; }
-  .gdt-role.role-sub{ color:#ce93d8; }
-
-  /* 去除右侧徽章（避免误解为 roleId） */
-  .gdt-count { display:none; }
-
-  .gdt-children { margin-left: 18px; border-left:1px dashed var(--border-dash); padding-left: 10px; }
+  .gdt-children { margin-left: 18px; border-left:1px dashed rgba(255,255,255,.12); padding-left: 10px; }
   .gdt-children.is-collapsed { display:none; }
-
   .gdt-node--device { padding:2px 6px 2px 22px; display:flex; align-items:center; gap:6px; cursor:pointer; }
   .gdt-node--device:hover { background:#0e1a24; border-radius:4px; }
 
-  /* 未分组区域 */
   .gdt-section { margin: 8px 8px 12px; }
-  .gdt-section__title { font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e; border-radius:4px; border: 1px solid var(--panel-line); }
+  .gdt-section__title { font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e; border-radius:4px; border: 1px solid rgba(255,255,255,.08); }
   .gdt-list { padding:6px 8px; display:flex; flex-direction:column; gap:4px; }
   .gdt-chip { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:4px; cursor:pointer; background: transparent; border: 1px solid transparent; }
-  .gdt-chip:hover { background: var(--chip-hover); border-color: var(--panel-line); }
+  .gdt-chip:hover { background: #15202b; border-color: rgba(255,255,255,.08); }
   .gdt-chip .gdt-title { white-space: nowrap; }
   .gdt-chip.is-online .gdt-title { color: var(--online-text); }
   .gdt-chip.is-offline .gdt-title { color: var(--offline-text); }
-
-  /* 地图适配 */
-  .map-container { width: 100%; height: 100%; }
   `;
   const style = document.createElement('style');
   style.id = __SITE_STYLE_ID;
@@ -171,7 +154,7 @@ function injectSiteStylesOnce() {
   __SITE_STYLE_INJECTED = true;
 }
 
-/* ========== 入口挂载 ========== */
+/* ---------- 页面挂载/卸载 ---------- */
 const LS_LEFT_WIDTH_KEY = 'site.left.width';
 const MIN_LEFT_WIDTH = 240;
 const MAX_LEFT_WIDTH_VW = 50;
@@ -179,77 +162,76 @@ const MAX_LEFT_WIDTH_VW = 50;
 export function mountSitePage() {
   injectSiteStylesOnce();
 
+  // 禁止整页滚动
+  __prevHtmlOverflow = document.documentElement.style.overflow;
+  __prevBodyOverflow = document.body.style.overflow;
+  document.documentElement.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden';
+
   const main = document.getElementById('mainView');
   main.innerHTML = `
     <div class="site-page">
       <div class="site-layout" id="siteLayout">
         <div class="site-left" id="siteLeft">
           <div class="filters">
-            <div>
-              <label>设备类型：
-                <select id="fltDevType"><option value="0">全部</option></select>
-              </label>
-            </div>
-            <div>
-              <label>设备模式：
-                <select id="fltDevMode"><option value="0">全部</option></select>
-              </label>
-            </div>
-            <div>
-              <label>名称/编号：
-                <input id="fltSearch" placeholder="模糊搜索"/>
-              </label>
-            </div>
-            <div class="only-online">
-              <label><input type="checkbox" id="fltOnline"/> 仅显示在线</label>
-            </div>
-            <div>
-              <button class="btn btn-sm" id="btnSiteRefresh">刷新</button>
+            <div><label>设备类型：<select id="fltDevType"><option value="0">全部</option></select></label></div>
+            <div><label>设备模式：<select id="fltDevMode"><option value="0">全部</option></select></label></div>
+            <div><label>名称/编号：<input id="fltSearch" placeholder="模糊搜索"/></label></div>
+            <div class="only-online"><label><input type="checkbox" id="fltOnline"/> 仅显示在线</label></div>
+            <div><button class="btn btn-sm" id="btnSiteRefresh">刷新</button></div>
+          </div>
+          <div class="device-tree" id="deviceTree"></div>
+        </div>
+
+        <div class="site-splitter" id="siteSplitter" title="拖动调整左侧宽度"></div>
+
+        <div class="site-center">
+          <div class="top-row">
+            <div class="map-wrap"><div id="mapContainer" class="map-container">地图加载中...</div></div>
+            <div class="side-panel">
+              <div class="panel-box">
+                <h3>设备状态</h3>
+                <div id="summaryChart"></div>
+              </div>
+              <div class="panel-box">
+                <h3>通知列表</h3>
+                <div id="notifyList" class="panel-scroll"></div>
+              </div>
             </div>
           </div>
-          <div class="device-tree" id="deviceTree"><!-- 树 --></div>
-        </div>
-        <div class="site-splitter" id="siteSplitter" title="拖动调整左侧宽度"></div>
-        <div class="site-center">
-          <div id="mapContainer" class="map-container">地图加载中...</div>
-        </div>
-        <div class="site-right">
-            <div class="summary-panel">
-              <h3>设备状态</h3>
-              <div id="summaryChart"></div>
+
+          <div class="bottom-row">
+            <div class="media-grid" id="mediaGrid">
+              ${[0,1,2,3].map(i => `
+                <div class="media-cell" data-idx="${i}">
+                  <div class="media-head">
+                    <div class="media-title" id="mediaTitle${i}">空闲</div>
+                    <button class="media-close" data-close="${i}" title="关闭">✕</button>
+                  </div>
+                  <div class="media-body" id="mediaBody${i}">
+                    <div class="media-placeholder">在此显示视频流或模式</div>
+                  </div>
+                </div>
+              `).join('')}
             </div>
-            <div class="notify-panel">
-              <h3>通知列表</h3>
-              <div id="notifyList" class="notify-list"></div>
-            </div>
+          </div>
         </div>
       </div>
     </div>
   `;
-  document.getElementById('previewBar').classList.remove('hidden');
 
   initSplitter();
-
   bindFilters();
+  initMediaGrid();
+
   unsubSite = siteState.subscribe(renderSite);
-  unsubPreview = previewState.subscribe(renderPreviewBar);
+  unsubPreview = previewState.subscribe(()=>{});
 
-  // 加载基础数据
   loadBaseData();
-
-  // 初始化地图
   initAMap();
-
-  // 建立（或准备）WebSocket
   ensureWS();
-
-  // 模式模拟器启动
-  startModeSimulator();
-
-  // 离开 /site 自动清理地图与浮层；回到 /site 自动恢复地图
   setupRouteWatcher();
 
-  // 窗口尺寸变更时，通知地图自适应
   window.addEventListener('resize', onWindowResize);
 }
 
@@ -258,50 +240,22 @@ export function unmountSitePage() {
 }
 
 function teardownPage() {
-  unsubSite && unsubSite();
-  unsubPreview && unsubPreview();
-  unsubSite = unsubPreview = null;
+  unsubSite && unsubSite(); unsubSite = null;
+  unsubPreview && unsubPreview(); unsubPreview = null;
 
-  stopModeSimulator();
   window.removeEventListener('resize', onWindowResize);
-
   removeRouteWatcher();
 
-  // 关闭地图与浮层
+  // 恢复整页滚动设置
+  document.documentElement.style.overflow = __prevHtmlOverflow;
+  document.body.style.overflow = __prevBodyOverflow;
+
+  closeInfoWindow();
   destroyAMap();
-  forceCloseOverlay();
-
-  const bar = document.getElementById('previewBar');
-  if (bar) bar.classList.add('hidden');
+  destroyAllMediaSlots();
 }
 
-/* ========== 路由监听：离开 /site 时清理 ========== */
-function setupRouteWatcher() {
-  removeRouteWatcher();
-  const handler = () => {
-    const isSite = String(location.hash || '').includes('/site');
-    if (!isSite) {
-      // 离开现场管理：销毁地图 + 关闭浮层
-      destroyAMap();
-      forceCloseOverlay();
-    } else {
-      // 回到现场管理：若地图尚未就绪则创建
-      if (!mapInstance) initAMap();
-    }
-  };
-  window.addEventListener('hashchange', handler);
-  routeWatcher = handler;
-  // 首次也检查一次
-  handler();
-}
-function removeRouteWatcher() {
-  if (routeWatcher) {
-    window.removeEventListener('hashchange', routeWatcher);
-    routeWatcher = null;
-  }
-}
-
-/* ========== 左侧栏宽度拖拽 ========== */
+/* ---------- 左侧栏宽度拖拽 ---------- */
 let splitterMoveHandler = null;
 let splitterUpHandler = null;
 
@@ -310,7 +264,6 @@ function initSplitter() {
   const left = document.getElementById('siteLeft');
   const splitter = document.getElementById('siteSplitter');
 
-  // 读取上次宽度
   const saved = Number(localStorage.getItem(LS_LEFT_WIDTH_KEY));
   if (saved && saved >= MIN_LEFT_WIDTH) {
     left.style.width = saved + 'px';
@@ -330,15 +283,12 @@ function initSplitter() {
     };
     splitterUpHandler = () => {
       splitter.classList.remove('dragging');
-      // 保存宽度
       const w = parseInt(left.style.width || getComputedStyle(left).width, 10);
       if (w) localStorage.setItem(LS_LEFT_WIDTH_KEY, String(w));
-      // 收尾一次地图 resize
-      if (mapInstance) { try { mapInstance.resize(); } catch(e){} }
+      try { mapInstance && mapInstance.resize(); } catch {}
       document.removeEventListener('mousemove', splitterMoveHandler);
       document.removeEventListener('mouseup', splitterUpHandler);
-      splitterMoveHandler = null;
-      splitterUpHandler = null;
+      splitterMoveHandler = null; splitterUpHandler = null;
     };
     document.addEventListener('mousemove', splitterMoveHandler);
     document.addEventListener('mouseup', splitterUpHandler);
@@ -346,42 +296,48 @@ function initSplitter() {
   });
 }
 
-function destroySplitter() {
-  const splitter = document.getElementById('siteSplitter');
-  if (!splitter) return;
-  splitter.classList.remove('dragging');
-  if (splitterMoveHandler) document.removeEventListener('mousemove', splitterMoveHandler);
-  if (splitterUpHandler) document.removeEventListener('mouseup', splitterUpHandler);
-  splitterMoveHandler = null;
-  splitterUpHandler = null;
-}
-
 function onWindowResize() {
-  if (mapInited && mapInstance) {
-    try { mapInstance.resize(); } catch {}
+  try { mapInstance && mapInstance.resize(); } catch {}
+}
+const throttleMapResize = throttle(()=>{ try { mapInstance && mapInstance.resize(); } catch {} }, 60);
+
+/* ---------- 路由监听（离开 /site 清理，返回重建） ---------- */
+function setupRouteWatcher() {
+  removeRouteWatcher();
+  const handler = () => {
+    const isSite = String(location.hash || '').includes('/site');
+    if (!isSite) {
+      closeInfoWindow();
+      destroyAMap();
+      destroyAllMediaSlots();
+      return;
+    }
+    // 回到现场管理：稳妥初始化并多次 resize 提升成功率
+    initAMap().then(() => {
+      requestAnimationFrame(() => { try { mapInstance && mapInstance.resize(); } catch {} });
+      setTimeout(() => { try { mapInstance && mapInstance.resize(); } catch {} }, 120);
+    });
+  };
+  window.addEventListener('hashchange', handler);
+  routeWatcher = handler;
+  handler();
+}
+function removeRouteWatcher() {
+  if (routeWatcher) {
+    window.removeEventListener('hashchange', routeWatcher);
+    routeWatcher = null;
   }
 }
 
-const throttleMapResize = throttle(() => {
-  if (mapInited && mapInstance) {
-    try { mapInstance.resize(); } catch {}
-  }
-}, 60);
-
-/* ------- 过滤、数据加载 ------- */
+/* ---------- 过滤与数据 ---------- */
 function bindFilters() {
   const left = document.getElementById('siteLeft');
   left.addEventListener('change', e => {
-    if (e.target.id === 'fltDevType' || e.target.id === 'fltDevMode' || e.target.id === 'fltOnline') {
-      updateFilters();
-    }
+    if (['fltDevType','fltDevMode','fltOnline'].includes(e.target.id)) updateFilters();
   });
   left.querySelector('#fltSearch').addEventListener('input', debounce(updateFilters,300));
-  left.querySelector('#btnSiteRefresh').addEventListener('click', () => {
-    loadBaseData(true);
-  });
+  left.querySelector('#btnSiteRefresh').addEventListener('click', () => loadBaseData(true));
 }
-
 function updateFilters() {
   const devType = Number(document.getElementById('fltDevType').value);
   const devMode = Number(document.getElementById('fltDevMode').value);
@@ -392,64 +348,53 @@ function updateFilters() {
   loadDeviceTrees();
   loadSummary();
 }
-
-function loadBaseData(force = false) {
-  Promise.all([
-    apiDevTypes(),
-    apiDevModes(),
-    apiOnlineList(),
-    apiDeviceSummary()
-  ]).then(([types, modes, online, summary]) => {
-    fillDevTypeSelect(types.devTypeList || []);
-    fillDevModeSelect(modes.devModeList || []);
-    siteState.set({
-      notifications: (online.list || []).slice(0,50),
-      summary: {
-        total: summary.total,
-        onlineCount: summary.onlineCount,
-        stateList: summary.stateList || []
-      }
-    });
-    loadDeviceTrees();
-  }).catch(err => {
-    console.error('[Site] loadBaseData error', err);
-  });
+function loadBaseData() {
+  Promise.all([apiDevTypes(), apiDevModes(), apiOnlineList(), apiDeviceSummary()])
+    .then(([types, modes, online, summary]) => {
+      fillDevTypeSelect(types.devTypeList || []);
+      fillDevModeSelect(modes.devModeList || []);
+      siteState.set({
+        notifications: (online.list || []).slice(0,50),
+        summary: {
+          total: summary.total,
+          onlineCount: summary.onlineCount,
+          stateList: summary.stateList || []
+        }
+      });
+      loadDeviceTrees();
+    })
+    .catch(err => console.error('[Site] loadBaseData error', err));
 }
-
 function loadDeviceTrees() {
   const filters = siteState.get().filters;
-  Promise.all([
-    apiGroupedDevices(filters),
-    apiUngroupedDevices(filters)
-  ]).then(([g,u]) => {
-    siteState.set({
-      groupedDevices: g.devList || [],
-      ungroupedDevices: u.devList || []
+  Promise.all([apiGroupedDevices(filters), apiUngroupedDevices(filters)])
+    .then(([g,u]) => {
+      siteState.set({
+        groupedDevices: g.devList || [],
+        ungroupedDevices: u.devList || []
+      });
+      buildTree();
+      buildMarkers();
+    })
+    .catch(err => {
+      console.error('[Site] loadDeviceTrees error', err);
+      siteState.set({ groupedDevices: [], ungroupedDevices: [] });
+      buildTree(); buildMarkers();
     });
-    buildTree();
-    buildMarkers();
-  }).catch(err => {
-    console.error('[Site] loadDeviceTrees error', err);
-    siteState.set({ groupedDevices: [], ungroupedDevices: [] });
-    buildTree();
-    buildMarkers();
-  });
 }
-
 function loadSummary() {
-  apiDeviceSummary().then(summary => {
-    siteState.set({
-      summary: {
-        total: summary.total,
-        onlineCount: summary.onlineCount,
-        stateList: summary.stateList || []
-      }
-    });
-  }).catch(err => {
-    console.error('[Site] loadSummary error', err);
-  });
+  apiDeviceSummary()
+    .then(summary => {
+      siteState.set({
+        summary: {
+          total: summary.total,
+          onlineCount: summary.onlineCount,
+          stateList: summary.stateList || []
+        }
+      });
+    })
+    .catch(err => console.error('[Site] loadSummary error', err));
 }
-
 function fillDevTypeSelect(list) {
   const sel = document.getElementById('fltDevType');
   const cur = sel.value;
@@ -463,103 +408,28 @@ function fillDevModeSelect(list) {
   sel.value = cur || '0';
 }
 
-/* ------- 角色映射与当前用户 ------- */
-// REPLACE: 角色映射常量
-// 0=管理员，1=测试人员，2=总帐号，3=子帐号
-const ROLE_ID_MAP = window.__ROLE_ID_MAP || {
-  0: { key: 'admin',  label: '管理员' },
-  1: { key: 'tester', label: '测试人员' },
-  2: { key: 'owner',  label: '总帐号' },
-  3: { key: 'sub',    label: '子帐号' }
-};
-
-// PATCH: 角色工具
-function roleKey(raw) {
-  const s = String(raw ?? '').toLowerCase();
-  // 注意：这里的 '1' 映射为 tester，'2' 映射为 owner，'3' 映射为 sub
-  if (['0','admin','管理员'].includes(s)) return 'admin';
-  if (['1','tester','测试人员'].includes(s)) return 'tester';
-  if (['2','owner','main','总帐号','root'].includes(s)) return 'owner';
-  if (['3','sub','子帐号','child'].includes(s)) return 'sub';
-  return 'user';
-}
-
-function getRoleDisplay(u) {
-  if (!u) return { key: 'user', label: '用户' };
-  // 1) 优先 roleId
-  if (u.roleId != null && ROLE_ID_MAP[u.roleId]) return ROLE_ID_MAP[u.roleId];
-  // 2) 再看 roleName
-  if (u.roleName) return { key: roleKey(u.roleName), label: u.roleName };
-  // 3) 最后看 role
-  const key = roleKey(u.role);
-  const label = ({ admin:'管理员', tester:'测试人员', owner:'总帐号', sub:'子帐号', user:'用户' })[key] || '用户';
-  return { key, label };
-}
-// PATCH: 读取 localStorage 的当前用户（尽量兼容不同项目的存储 key）
-function readCurrentUserFromStorage() {
-  const keys = [
-    'currentUser', 'auth.currentUser', 'auth_user',
-    'USER_INFO', 'USER', 'loginUser', 'user'
-  ];
-  for (const k of keys) {
-    try {
-      const v = localStorage.getItem(k);
-      if (!v) continue;
-      const obj = typeof v === 'string' ? JSON.parse(v) : v;
-      if (obj && obj.userId != null) return obj;
-    } catch (e) {
-      // 有些项目把纯对象字符串化方式不同，尝试直接返回
-      try { if (v && v.userId != null) return v; } catch {}
-    }
-  }
-  return null;
-}
-// PATCH: 严格版当前用户获取（不返回“管理员兜底”），用于决定树根与角色显示
-function getCurrentUserStrict() {
-  try {
-    const st = siteState.get();
-    if (st?.currentUser?.userId != null) return st.currentUser;
-  } catch(e){}
-  if (window.__currentUser?.userId != null) return window.__currentUser;
-
-  const fromLS = readCurrentUserFromStorage();
-  if (fromLS?.userId != null) {
-    // 顺便灌回状态，后续就稳定了
-    try { siteState.set({ currentUser: fromLS }); } catch {}
-    return fromLS;
-  }
-  return null; // 严格：拿不到就返回 null，不用“管理员”兜底
-}
-// PATCH: （保留原有 getCurrentUser 以兼容其他调用）
-// 如仍有旧代码依赖兜底，这里保留“仅用于显示”的管理员 fallback，
-// 但树构建与角色标签一律使用 getCurrentUserStrict。
-function getCurrentUser() {
-  const strict = getCurrentUserStrict();
-  if (strict) return strict;
-  // 仅用于兜底显示，不参与树根选择
-  return { userId: null, roleId: 0, role: 'admin', roleName: '管理员', userName: '管理员' };
-}
-
-/* ------- 树构建（用户树 + 设备） ------- */
-// PATCH: 规范化用户信息（带 onlineState）
+/* ---------- 树（根为当前用户；根行不显示角色名；在线状态来自 onlineState） ---------- */
 function normalizeUserInfo(ui) {
   if (!ui) return null;
   return {
     userId: ui.userId ?? ui.id,
     userName: ui.userName ?? ui.name ?? '',
     parentUserId: ui.parentUserId ?? ui.pid ?? null,
-    role: ui.role ?? ui.userRole ?? ui.type,
-    roleId: ui.roleId != null ? Number(ui.roleId) : undefined,
-    roleName: ui.roleName,
+    roleId: ui.roleId, roleName: ui.roleName, role: ui.role,
     onlineState: typeof ui.onlineState === 'boolean' ? ui.onlineState : undefined
   };
 }
-
-// REPLACE: 构建用户森林（强制以当前用户为唯一根，并过滤上级）
+function getCurrentUserStrict() {
+  try { const st = siteState.get(); if (st?.currentUser?.userId != null) return st.currentUser; } catch {}
+  if (window.__currentUser?.userId != null) return window.__currentUser;
+  try {
+    const raw = localStorage.getItem('currentUser') || localStorage.getItem('auth.currentUser') || localStorage.getItem('USER_INFO');
+    if (raw) { const obj = JSON.parse(raw); if (obj?.userId != null) return obj; }
+  } catch {}
+  return null;
+}
 function buildUserForestFromGroupedDevices(groupedDevices) {
   const userMap = new Map();
-
-  // 1) 收集用户节点（带 userInfo.onlineState）
   groupedDevices.forEach(entry => {
     const ui = normalizeUserInfo(entry.userInfo);
     if (!ui || ui.userId == null) return;
@@ -567,200 +437,138 @@ function buildUserForestFromGroupedDevices(groupedDevices) {
       userMap.set(ui.userId, { ...ui, type: 'user', children: [], deviceChildren: [], isOnline: ui.onlineState });
     } else {
       const cur = userMap.get(ui.userId);
-      userMap.set(ui.userId, {
-        ...cur,
-        userName: cur.userName || ui.userName,
-        role: cur.role || ui.role,
-        roleId: cur.roleId ?? ui.roleId,
-        roleName: cur.roleName || ui.roleName,
-        parentUserId: cur.parentUserId ?? ui.parentUserId,
-        isOnline: typeof cur.isOnline === 'boolean' ? cur.isOnline : ui.onlineState
-      });
+      userMap.set(ui.userId, { ...cur, ...ui, children: cur.children, deviceChildren: cur.deviceChildren, isOnline: cur.isOnline ?? ui.onlineState });
     }
   });
-
-  // 2) 如果当前用户不在 userMap，补一个“合成的根节点”
-  const cu = getCurrentUser();
-  if (cu?.userId != null && !userMap.has(cu.userId)) {
-    userMap.set(cu.userId, {
-      userId: cu.userId,
-      userName: cu.userName || '',
-      parentUserId: null, // 作为根，不连接上级
-      role: cu.role,
-      roleId: cu.roleId,
-      roleName: cu.roleName,
-      type: 'user',
-      children: [],
-      deviceChildren: [],
-      isOnline: undefined
-    });
-  }
-
-  // 3) 附加设备（devInfo.onlineState）
   groupedDevices.forEach(entry => {
-    const ui = normalizeUserInfo(entry.userInfo);
-    const di = entry.devInfo || {};
-    if (!ui || ui.userId == null || di == null) return;
-    const node = userMap.get(ui.userId);
-    if (!node) return;
-    node.deviceChildren.push({
-      type: 'device',
-      devId: di.id,
-      devName: di.no || di.name || String(di.id || ''),
-      onlineState: !!di.onlineState,
-      raw: di
-    });
+    const ui = normalizeUserInfo(entry.userInfo); const di = entry.devInfo || {};
+    if (!ui || ui.userId == null) return;
+    const node = userMap.get(ui.userId); if (!node) return;
+    node.deviceChildren.push({ type:'device', devId: di.id, devName: di.no || di.name || String(di.id || ''), onlineState: !!di.onlineState, raw: di });
   });
-
-  // 4) 建立父子关系（以 userMap 中的节点为准）
   userMap.forEach(node => { node.children = node.children || []; });
-  userMap.forEach(node => {
-    const pid = node.parentUserId;
-    if (pid != null && userMap.has(pid)) {
-      userMap.get(pid).children.push(node);
-    }
-  });
+  userMap.forEach(node => { const pid = node.parentUserId; if (pid != null && userMap.has(pid)) userMap.get(pid).children.push(node); });
 
-  // 5) 在线聚合：若用户 isOnline 未给，则按子/设备聚合
   function computeOnline(n) {
     if (typeof n.isOnline === 'boolean') return n.isOnline;
     let online = n.deviceChildren?.some(d => d.onlineState) || false;
-    if (n.children?.length) {
-      for (const c of n.children) online = computeOnline(c) || online;
-    }
-    n.isOnline = online;
-    return online;
+    if (n.children?.length) for (const c of n.children) online = computeOnline(c) || online;
+    n.isOnline = online; return online;
   }
   userMap.forEach(n => computeOnline(n));
 
-  // 6) 以“当前用户”为唯一根，并过滤掉其上级
-  const selfNode = cu?.userId != null ? userMap.get(cu.userId) : null;
-  if (selfNode) {
-    // 确保根节点不指向上级
-    selfNode.parentUserId = null;
-    return { roots: [selfNode], userMap, currentUser: cu };
+  const cu = getCurrentUserStrict();
+  if (cu?.userId != null && userMap.has(cu.userId)) {
+    const root = userMap.get(cu.userId);
+    root.parentUserId = null; // 切断上级
+    return { roots: [root] };
   }
-
-  // 兜底：没有当前用户节点时，按接口顶层（极少发生）
-  const roots = [];
-  userMap.forEach(n => { if (n.parentUserId == null || !userMap.has(n.parentUserId)) roots.push(n); });
-  return { roots, userMap, currentUser: cu };
+  const roots = []; userMap.forEach(n => { if (n.parentUserId == null || !userMap.has(n.parentUserId)) roots.push(n); });
+  return { roots };
 }
-
-// REPLACE: 渲染用户节点（根节点显示当前登录用户角色）
-function renderUserNodeHTML(node, level = 1, expandLevel = 2, rootRoleDisp = null) {
+function renderUserNodeHTML(node, level = 1, expandLevel = 2) {
   const hasChildren = (node.children && node.children.length) || (node.deviceChildren && node.deviceChildren.length);
   const expanded = level <= expandLevel;
   const rowOnlineCls = node.isOnline ? 'is-online' : 'is-offline';
-
-  const roleSpan = (level === 1 && rootRoleDisp)
-    ? `<span class="gdt-role role-${rootRoleDisp.key}">${escapeHTML(rootRoleDisp.label)}</span>`
-    : '';
-
   const header = `
     <div class="gdt-row ${rowOnlineCls}" data-node-type="user" data-user-id="${node.userId}">
       <span class="gdt-toggle ${hasChildren ? '' : 'is-empty'}">${hasChildren ? (expanded ? '▾' : '▸') : ''}</span>
       <span class="gdt-icon gdt-icon-user"></span>
       <span class="gdt-title" title="${escapeHTML(node.userName)}">${escapeHTML(node.userName || '(未命名用户)')}</span>
-      ${roleSpan}
-      <span class="gdt-count"></span>
-    </div>
-  `;
-
+    </div>`;
   const childrenHTML = `
     <div class="gdt-children ${expanded ? '' : 'is-collapsed'}">
-      ${(node.children || []).map(child => renderUserNodeHTML(child, level + 1, expandLevel, rootRoleDisp)).join('')}
+      ${(node.children || []).map(child => renderUserNodeHTML(child, level + 1, expandLevel)).join('')}
       ${(node.deviceChildren || []).map(d => `
         <div class="gdt-node gdt-node--device ${d.onlineState ? 'is-online' : 'is-offline'}" data-devid="${d.devId}">
           <span class="gdt-icon gdt-icon-device"></span>
           <span class="gdt-title" title="${escapeHTML(d.devName)}">${escapeHTML(d.devName)}</span>
         </div>
       `).join('')}
-    </div>
-  `;
-
+    </div>`;
   return `<div class="gdt-node gdt-node--user" data-user-id="${node.userId}">${header}${hasChildren ? childrenHTML : ''}</div>`;
 }
-
-// REPLACE: 构建并渲染整棵树（根角色名从 currentUser.roleId/roleName 决定）
-// REPLACE: 构建并渲染整棵树（隐藏根用户角色名称）
 function buildTree() {
   const treeEl = document.getElementById('deviceTree');
   const { groupedDevices, ungroupedDevices } = siteState.get();
-
-  const { roots /*, currentUser */ } = buildUserForestFromGroupedDevices(groupedDevices);
-
-  // 关键：把 rootRoleDisp 设为 null，即可隐藏根用户角色名
-  const rootRoleDisp = null;
-
+  const { roots } = buildUserForestFromGroupedDevices(groupedDevices);
   const expandLevel = 2;
   const treeHTML = `
-    <div class="gdt-tree">
-      ${roots.map(root => renderUserNodeHTML(root, 1, expandLevel, rootRoleDisp)).join('')}
-    </div>
+    <div class="gdt-tree">${roots.map(root => renderUserNodeHTML(root, 1, expandLevel)).join('')}</div>
     <div class="gdt-section">
       <div class="gdt-section__title">未分组设备 (${ungroupedDevices.length})</div>
       <div class="gdt-list">
         ${ungroupedDevices.map(e => {
-          const d = e.devInfo || {};
-          const name = d.no || d.name || String(d.id || '');
-          const cls = d.onlineState ? 'is-online' : 'is-offline';
-          return `
-            <div class="gdt-chip ${cls}" data-devid="${d.id}" title="${escapeHTML(name)}">
-              <span class="gdt-icon gdt-icon-device"></span>
-              <span class="gdt-title">${escapeHTML(name)}</span>
-            </div>
-          `;
+          const d = e.devInfo || {}; const name = d.no || d.name || String(d.id || ''); const cls = d.onlineState ? 'is-online' : 'is-offline';
+          return `<div class="gdt-chip ${cls}" data-devid="${d.id}" title="${escapeHTML(name)}"><span class="gdt-icon gdt-icon-device"></span><span class="gdt-title">${escapeHTML(name)}</span></div>`;
         }).join('')}
       </div>
-    </div>
-  `;
+    </div>`;
   treeEl.innerHTML = treeHTML;
 
   treeEl.addEventListener('click', (e) => {
     const row = e.target.closest('.gdt-row');
     if (row && treeEl.contains(row)) {
-      const nodeEl = row.parentElement; // .gdt-node--user
-      const children = nodeEl.querySelector(':scope > .gdt-children');
-      const toggle = row.querySelector('.gdt-toggle');
-      if (children) {
-        const collapsed = children.classList.toggle('is-collapsed');
-        if (toggle) toggle.textContent = collapsed ? '▸' : '▾';
-      }
+      const nodeEl = row.parentElement; const children = nodeEl.querySelector(':scope > .gdt-children'); const toggle = row.querySelector('.gdt-toggle');
+      if (children) { const collapsed = children.classList.toggle('is-collapsed'); if (toggle) toggle.textContent = collapsed ? '▸' : '▾'; }
       return;
     }
     const devEl = e.target.closest('[data-devid]');
     if (devEl && treeEl.contains(devEl)) {
-      const devId = Number(devEl.getAttribute('data-devid'));
-      if (!Number.isNaN(devId)) openDeviceOverlay(devId);
+      const devId = Number(devEl.getAttribute('data-devid')); if (!Number.isNaN(devId)) openDeviceOverlay(devId);
     }
   }, { passive: true });
 }
 
-/* ------- 地图 (高德) ------- */
-function initAMap() {
-  if (mapInstance) return; // 已存在
-  // 若脚本已加载，直接初始化；否则加载脚本
-  if (window.AMap) {
-    createMap();
+/* ---------- 地图（高德） + InfoWindow ---------- */
+function ensureAMapReady() {
+  return new Promise((resolve, reject) => {
+    if (window.AMap) return resolve();
+    const id = 'amap-sdk-v2';
+    if (document.getElementById(id)) {
+      const wait = setInterval(() => {
+        if (window.AMap) { clearInterval(wait); resolve(); }
+      }, 50);
+      setTimeout(() => { clearInterval(wait); if (!window.AMap) reject(new Error('AMap not ready')); }, 6000);
+      return;
+    }
+    const s = document.createElement('script');
+    s.id = id;
+    s.src = `https://webapi.amap.com/maps?v=2.0&key=${ENV.AMAP_KEY}`;
+    s.onload = () => resolve();
+    s.onerror = (e) => reject(e);
+    document.head.appendChild(s);
+  });
+}
+
+async function initAMap() {
+  const container = document.getElementById('mapContainer');
+  if (!container) return;
+  if (mapInstance) {
+    try { mapInstance.resize(); } catch {}
     return;
   }
-  const script = document.createElement('script');
-  script.src = `https://webapi.amap.com/maps?v=2.0&key=${ENV.AMAP_KEY}`;
-  script.onload = () => {
-    try { createMap(); } catch (e) { console.error('[Site] AMap init error', e); }
-  };
-  script.onerror = (e) => {
-    console.error('[Site] AMap script load error', e);
-  };
-  document.head.appendChild(script);
+  try {
+    await ensureAMapReady();
+    // 确保容器进入布局流
+    await new Promise(r => requestAnimationFrame(r));
+    createMap();
+    // 观察容器尺寸变化，变化时强制 resize
+    if (!mapResizeObs) {
+      mapResizeObs = new ResizeObserver(() => {
+        try { mapInstance && mapInstance.resize(); } catch {}
+      });
+      mapResizeObs.observe(container);
+    }
+  } catch (e) {
+    console.error('[Site] initAMap failed', e);
+  }
 }
 
 function createMap() {
   try {
     // eslint-disable-next-line no-undef
     mapInstance = new AMap.Map('mapContainer', { zoom: 5, center: [105.0, 35.0] });
-    mapInited = true;
     buildMarkers();
   } catch (e) {
     console.error('[Site] createMap error', e);
@@ -785,403 +593,278 @@ function buildMarkers() {
 }
 
 function destroyAMap() {
-  try {
-    if (markersLayer.length) {
-      markersLayer.forEach(m => { try { m.setMap(null); } catch {} });
-    }
-  } catch {}
+  try { markersLayer.forEach(m => { try { m.setMap(null); } catch {} }); } catch {}
   markersLayer = [];
   if (mapInstance) {
     try { mapInstance.destroy(); } catch {}
     mapInstance = null;
   }
-  mapInited = false;
+  if (mapResizeObs) {
+    try { const c = document.getElementById('mapContainer'); c && mapResizeObs.unobserve(c); } catch {}
+    mapResizeObs.disconnect?.();
+    mapResizeObs = null;
+  }
   const mc = document.getElementById('mapContainer');
-  if (mc) mc.innerHTML = '';
+  if (mc) mc.innerHTML = '地图加载中...';
 }
 
-/* ------- 设备详情浮层 ------- */
-function forceCloseOverlay() {
-  try {
-    const st = siteState.get().overlay || {};
-    if (st.open) siteState.set({ overlay: { ...st, open: false } });
-  } catch {}
-  const root = document.getElementById('overlayRoot');
-  if (root) root.innerHTML = '';
+/* InfoWindow（跟随标注点） */
+function closeInfoWindow() {
+  try { if (infoWindow) infoWindow.close(); } catch {}
+  infoWindow = null;
+  currentInfoDevId = null;
 }
-
 function openDeviceOverlay(devId) {
   apiDeviceInfo(devId).then(data => {
     const info = data.devInfo;
-    siteState.set({
-      overlay: {
-        open: true,
-        devId: info.id,
-        selectedStream: 'main',
-        selectedModeId: info.modeList?.[0]?.id || null
-      }
-    });
-    renderOverlay(info);
+    currentInfoDevId = info.id;
+    const pos = info.lastLocation && info.lastLocation.lng != null && info.lastLocation.lat != null
+      ? [info.lastLocation.lng, info.lastLocation.lat]
+      : (mapInstance ? mapInstance.getCenter() : [105,35]);
+
+    // 构建自定义内容 DOM
+    const content = buildInfoContent(info);
+
+    // eslint-disable-next-line no-undef
+    if (!infoWindow) infoWindow = new AMap.InfoWindow({ isCustom: true, offset: new AMap.Pixel(0, -20), closeWhenClickMap: true });
+    infoWindow.setContent(content);
+    infoWindow.open(mapInstance, pos);
   }).catch(err => {
     console.error('[Site] apiDeviceInfo error', err);
     eventBus.emit('toast:show', { type: 'error', message: '获取设备信息失败' });
   });
 }
-
-function renderOverlay(info) {
-  const root = document.getElementById('overlayRoot');
-  if (!root) return;
-  root.innerHTML = `
-    <div class="overlay-card">
-      <div class="overlay-card__close" id="ovClose">×</div>
-      <h3>${info.no} ${info.onlineState ? '<span class="tag tag-green">在线</span>' : '<span class="tag tag-gray">离线</span>'} 
-        <span class="battery-badge">${info.battery != null ? info.battery + '%' : ''}</span>
-      </h3>
-      <div class="ov-section">
-        <div>位置：${info.lastLocation ? (info.lastLocation.lat + ',' + info.lastLocation.lng + ' 高度:' + info.lastLocation.height + 'm') : '无定位数据'}</div>
-        <div>更新时间：${info.lastLocation ? formatTime(info.lastLocation.time) : ''}  速度：${info.lastLocation ? info.lastLocation.speed + ' km/h' : ''}</div>
-      </div>
-      <div class="ov-section">
-        <label>视频流：
-          <select id="ovStreamSel">
-            <option value="main">主码流</option>
-            <option value="sub">副码流</option>
-          </select>
-        </label>
-        <button class="btn btn-sm" id="btnOpenVideo">打开视频</button>
-      </div>
-      <div class="ov-section">
-        <label>模式：
-          <select id="ovModeSel">
-            ${(info.modeList||[]).map(m => `<option value="${m.id}">${m.name}</option>`).join('')}
-          </select>
-        </label>
-        <button class="btn btn-sm" id="btnOpenMode">打开模式</button>
-      </div>
-      <div class="ov-section ov-actions">
-        <button class="btn btn-sm" id="btnDetail">详细(占位)</button>
-        <button class="btn btn-sm" id="btnRefreshInfo">刷新</button>
-      </div>
+function buildInfoContent(info) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'min-width:340px;max-width:420px;background:#111c28;color:#cfd8dc;border:1px solid rgba(255,255,255,.12);border-radius:6px;box-shadow:0 8px 22px rgba(0,0,0,.45);';
+  wrap.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);">
+      <div style="font-weight:600;">${escapeHTML(info.no || String(info.id||''))} ${info.onlineState?'<span style="font-size:12px;color:#7ef58b;margin-left:6px;">在线</span>':'<span style="font-size:12px;color:#99a;margin-left:6px;">离线</span>'}</div>
+      <button id="ovCloseBtn" title="关闭" style="background:transparent;border:none;color:#ccd;cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:10px 12px;font-size:12px;line-height:1.7;">
+      <div>位置：${info.lastLocation ? (info.lastLocation.lat + ',' + info.lastLocation.lng + (info.lastLocation.height!=null?(' 高度:'+info.lastLocation.height+'m'):'') ) : '无定位数据'}</div>
+      <div>更新时间：${info.lastLocation ? formatTime(info.lastLocation.time) : ''}  速度：${info.lastLocation ? (info.lastLocation.speed || 0) + ' km/h' : ''}</div>
+    </div>
+    <div style="padding:0 12px 12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <label>媒体：<select id="ovStreamSel"><option value="main">主码流</option></select></label>
+      <button class="btn btn-sm" id="btnOpenVideo" style="padding:4px 8px;background:#1f497d;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;">打开视频</button>
+      <label style="margin-left:8px;">设备模式：<select id="ovModeSel">${(info.modeList||[]).map(m=>`<option value="${m.id}">${escapeHTML(m.name)}</option>`).join('')}</select></label>
+      <button class="btn btn-sm" id="btnOpenMode" style="padding:4px 8px;background:#1f497d;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;">打开模式</button>
+      <button class="btn btn-sm" id="btnRefreshInfo" style="margin-left:auto;padding:4px 8px;background:#203246;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;">刷新</button>
     </div>
   `;
-  root.querySelector('#ovClose').addEventListener('click', () => {
-    siteState.set({ overlay: { ...siteState.get().overlay, open: false } });
-    root.innerHTML = '';
+
+  wrap.querySelector('#ovCloseBtn').addEventListener('click', () => closeInfoWindow());
+  wrap.querySelector('#btnOpenVideo').addEventListener('click', () => openVideoInGrid(info.id, info.no || String(info.id || '')));
+  wrap.querySelector('#btnOpenMode').addEventListener('click', () => {
+    const modeId = wrap.querySelector('#ovModeSel').value;
+    openModeInGrid(info.id, info.no || String(info.id || ''), modeId);
   });
-  root.querySelector('#btnOpenVideo').addEventListener('click', () => {
-    const streamType = root.querySelector('#ovStreamSel').value;
-    openVideoPreview(info.id, info.no, streamType);
-  });
-  root.querySelector('#btnOpenMode').addEventListener('click', () => {
-    const modeId = root.querySelector('#ovModeSel').value;
-    openModePreview(info.id, info.no, modeId, info.modeList);
-  });
-  root.querySelector('#btnRefreshInfo').addEventListener('click', () => {
-    openDeviceOverlay(info.id);
-  });
+  wrap.querySelector('#btnRefreshInfo').addEventListener('click', () => openDeviceOverlay(info.id));
+  return wrap;
 }
 
-/* ------- 预览窗口管理（视频 & 模式） ------- */
-function openVideoPreview(devId, devNo, streamType) {
-  const key = `video:${devId}:${streamType}`;
-  const st = previewState.get();
-  if (st.windows.find(w => w.id === key)) {
-    eventBus.emit('toast:show', { type: 'info', message: streamType === 'main' ? '该主码流视频已在预览' : '该副码流视频已在预览' });
-    return;
-  }
-  if (st.windows.length >= st.capacity) {
-    eventBus.emit('toast:show', { type: 'error', message: `最多同时打开 ${st.capacity} 个预览窗口` });
-    return;
-  }
-  const title = `${devNo} ${streamType === 'main' ? '主码流' : '副码流'}`;
-  const order = st.windows.length;
-
-  previewState.set({
-    windows: [...st.windows, {
-      id: key,
-      devId,
-      kind: 'video',
-      subtype: streamType,
-      title,
-      status: 'connecting',
-      order,
-      createdAt: Date.now(),
-      player: null,
-      streamUrl: streamType === 'main'
-        ? 'webrtc://media.szdght.com/1/camera_audio'
-        : 'webrtc://media.szdght.com/1/screen'
-    }]
-  });
-
-  // 延迟等 DOM 渲染完成后开始真正挂载播放器
-  setTimeout(async () => {
-    const current = previewState.get().windows.find(w => w.id === key);
-    if (!current) return;
-    // 找到窗口 DOM
-    const winEl = document.querySelector(`.preview-win[data-id="${key}"] .pw-body`);
-    if (!winEl) return;
-    try {
-      const { createWebRTCPlayer } = await import('./webrtc/webrtcPlayer.js');
-      const player = createWebRTCPlayer({ streamType });
-      player.mount(winEl);
-      await player.play(current.streamUrl);
-      // 更新状态
-      const newArr = previewState.get().windows.map(w =>
-        w.id === key ? { ...w, status: player.getStatus()==='playing'?'playing':'error', player } : w
-      );
-      previewState.set({ windows: newArr });
-    } catch (e) {
-      console.error(e);
-      const newArr = previewState.get().windows.map(w =>
-        w.id === key ? { ...w, status:'error' } : w
-      );
-      previewState.set({ windows: newArr });
-    }
-  }, 50);
-}
-
-function closePreviewWindow(id) {
-  const st = previewState.get();
-  const target = st.windows.find(w => w.id === id);
-  if (target?.player) {
-    try { target.player.destroy(); } catch(e){}
-  }
-  let arr = st.windows.filter(w => w.id !== id);
-  arr = arr.map((w, idx) => ({ ...w, order: idx }));
-  previewState.set({ windows: arr });
-}
-
-function openModePreview(devId, devNo, modeId, modeList=[]) {
-  const key = `mode:${devId}:${modeId}`;
-  const st = previewState.get();
-  if (st.windows.find(w => w.id === key)) {
-    eventBus.emit('toast:show', { type: 'info', message: '该模式已在预览' });
-    return;
-  }
-  if (st.windows.length >= st.capacity) {
-    eventBus.emit('toast:show', { type: 'error', message: `最多同时打开 ${st.capacity} 个预览窗口` });
-    return;
-  }
-  const modeName = modeList.find(m => String(m.id) === String(modeId))?.name || '模式';
-  const order = st.windows.length;
-  previewState.set({
-    windows: [...st.windows, {
-      id: key,
-      devId, kind: 'mode', subtype: modeId,
-      title: `${devNo} ${modeName}`,
-      status: 'connecting', order, createdAt: Date.now(),
-      metrics: { angle: { x: rand(-1,1), y: rand(-1,1), z: rand(-1,1) }, move: 0.000, battery: randInt(90,100), lastUpdate: Date.now() }
-    }]
-  });
-  setTimeout(() => {
-    const now = previewState.get().windows.map(w => w.id === key ? { ...w, status: 'playing' } : w);
-    previewState.set({ windows: now });
-  }, 500);
-}
-
-function renderPreviewBar(pState) {
-  const bar = document.getElementById('previewBarInner');
-  computePreviewCapacity(); // 每次刷新重新确保容量的一致性
-  const { windows } = pState;
-  bar.innerHTML = windows
-    .sort((a,b) => a.order - b.order)
-    .map(w => previewWindowHTML(w))
-    .join('');
-
-  bar.querySelectorAll('.preview-win').forEach(win => {
-    win.querySelector('.close-btn').addEventListener('click', () => {
-      closePreviewWindow(win.getAttribute('data-id'));
-    });
-    // 拖拽
-    enableDrag(win);
-  });
-}
-
-function previewWindowHTML(w) {
-  const statusBadge = w.status === 'connecting' ? '连接中...' :
-    (w.status === 'error' ? '错误' : (w.kind === 'mode'
-      ? formatModeMetrics(w.metrics)
-      : ''));
-  return `
-    <div class="preview-win" data-id="${w.id}" draggable="true">
-      <div class="pw-head">
-        <span class="pw-title">${w.title}</span>
-        <button class="close-btn" title="关闭">×</button>
-      </div>
-      <div class="pw-body ${w.kind}">
-        ${w.kind === 'video'
-          ? (w.status === 'playing'
-              ? `<div class="video-placeholder">[视频画面占位 - ${w.subtype==='main'?'主码流':'副码流'}]</div>`
-              : `<div class="video-placeholder status">${statusBadge}</div>`
-            )
-          : (w.status === 'playing'
-              ? `<div class="mode-metrics">${statusBadge}</div>`
-              : `<div class="mode-metrics status">${statusBadge}</div>`
-            )
-        }
-      </div>
-    </div>
-  `;
-}
-
-function formatModeMetrics(metrics) {
-  if (!metrics) return '';
-  return `
-    <div class="metric-line">角度X：${metrics.angle.x.toFixed(2)}</div>
-    <div class="metric-line">角度Y：${metrics.angle.y.toFixed(2)}</div>
-    <div class="metric-line">角度Z：${metrics.angle.z.toFixed(2)}</div>
-    <div class="metric-line">位移值：${metrics.move.toFixed(3)}</div>
-    <div class="metric-line battery-${metrics.battery<=5?'red': metrics.battery<=10?'yellow':'normal'}">
-      电量：${metrics.battery}%
-    </div>
-  `;
-}
-
-/* ------- 预览条拖拽交换 ------- */
-function enableDrag(winEl) {
-  winEl.addEventListener('dragstart', e => {
-    e.dataTransfer.setData('text/plain', winEl.getAttribute('data-id'));
-    winEl.classList.add('dragging');
-  });
-  winEl.addEventListener('dragend', () => {
-    winEl.classList.remove('dragging');
-  });
-  winEl.addEventListener('dragover', e => {
-    e.preventDefault();
-  });
-  winEl.addEventListener('drop', e => {
-    e.preventDefault();
-    const fromId = e.dataTransfer.getData('text/plain');
-    const toId = winEl.getAttribute('data-id');
-    if (fromId === toId) return;
-    reorderWindows(fromId, toId);
-  });
-}
-
-function reorderWindows(fromId, toId) {
-  const st = previewState.get();
-  const arr = [...st.windows];
-  const fromIndex = arr.findIndex(w => w.id === fromId);
-  const toIndex = arr.findIndex(w => w.id === toId);
-  if (fromIndex < 0 || toIndex < 0) return;
-  const item = arr.splice(fromIndex, 1)[0];
-  arr.splice(toIndex, 0, item);
-  // 重排 order
-  const newArr = arr.map((w, idx) => ({ ...w, order: idx }));
-  previewState.set({ windows: newArr });
-}
-
-/* ------- 模式数据模拟器 ------- */
-let modeTimer = null;
-
-function startModeSimulator() {
-  if (modeTimer) return;
-  modeTimer = setInterval(() => {
-    const st = previewState.get();
-    let changed = false;
-    const newWins = st.windows.map(w => {
-      if (w.kind === 'mode' && w.status === 'playing') {
-        const m = { ...w.metrics };
-        // 漂移
-        m.angle.x = clamp(m.angle.x + rand(-0.05,0.05), -5, 5);
-        m.angle.y = clamp(m.angle.y + rand(-0.05,0.05), -5, 5);
-        m.angle.z = clamp(m.angle.z + rand(-0.05,0.05), -5, 5);
-        m.move = Math.max(0, m.move + rand(0.001,0.003));
-        // 电量衰减
-        if (Date.now() - (m._batteryTick || 0) > 5000) {
-          m._batteryTick = Date.now();
-          if (m.battery > 0) m.battery -= 1;
-        }
-        changed = true;
-        return { ...w, metrics: m };
-      }
-      return w;
-    });
-    if (changed) {
-      previewState.set({ windows: newWins });
-    }
-  }, 200);
-}
-
-function stopModeSimulator() {
-  if (modeTimer) {
-    clearInterval(modeTimer);
-    modeTimer = null;
-  }
-}
-
-/* ------- 渲染函数（summary / notifications） ------- */
+/* ---------- 右侧面板渲染 ---------- */
 function renderSite(s) {
   renderSummary(s.summary);
   renderNotifications(s.notifications);
-  if (!s.overlay.open) {
-    const or = document.getElementById('overlayRoot');
-    if (or) or.innerHTML = '';
+}
+function renderSummary(sum) {
+  const el = document.getElementById('summaryChart'); if (!el) return;
+  el.innerHTML = (sum?.stateList || []).map(item => {
+    const offline = item.total - item.onlineCount;
+    return `<div style="margin:6px 0;">
+      <div style="font-size:12px;margin-bottom:4px;">${escapeHTML(item.typeName || '')}</div>
+      <div style="display:flex;gap:4px;height:16px;">
+        <div style="flex:${item.onlineCount||0};background:#3d89ff;color:#fff;text-align:center;font-size:11px;line-height:16px;border-radius:3px;">${item.onlineCount||0}</div>
+        <div style="flex:${offline||0};background:#324153;color:#dde;text-align:center;font-size:11px;line-height:16px;border-radius:3px;">${offline||0}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function renderNotifications(list) {
+  const el = document.getElementById('notifyList'); if (!el) return;
+  el.innerHTML = (list || []).map(l => {
+    const displayName = l.uname || l.uid;
+    return `<div style="padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.06);font-size:12px;">${formatTime(l.time)} ${escapeHTML(String(displayName))} ${l.online ? '上线' : '下线'}</div>`;
+  }).join('');
+}
+
+/* ---------- 媒体格子：初始化/关闭/播放 ---------- */
+function initMediaGrid() {
+  mediaSlots.forEach(slot => {
+    slot.node = document.querySelector(`.media-cell[data-idx="${slot.idx}"]`);
+    const closeBtn = slot.node.querySelector(`[data-close="${slot.idx}"]`);
+    closeBtn.addEventListener('click', () => closeMediaSlot(slot.idx));
+  });
+}
+function destroyAllMediaSlots() { mediaSlots.forEach(s => closeMediaSlot(s.idx)); }
+function closeMediaSlot(idx) {
+  const s = mediaSlots[idx]; if (!s) return;
+  if (s.timer) { clearInterval(s.timer); s.timer = null; }
+  if (s.player && s.player.destroy) { try { s.player.destroy(); } catch {} }
+  s.player = null; s.type = null; s.title = '';
+  const titleEl = document.getElementById(`mediaTitle${idx}`);
+  const bodyEl = document.getElementById(`mediaBody${idx}`);
+  if (titleEl) titleEl.textContent = '空闲';
+  if (bodyEl) bodyEl.innerHTML = `<div class="media-placeholder">在此显示视频流或模式</div>`;
+}
+
+/* SRS 播放器封装（基于 rtc_player7.html 思路：video+canvas 渲染） */
+function makeRenderLoop(draw){ let run=false; function loop(){ if(!run) return; draw(); requestAnimationFrame(loop); } return { start(){ if(!run){run=true; requestAnimationFrame(loop);} }, stop(){ run=false; } }; }
+function createSrsCanvasPlayer() {
+  const video = document.createElement('video');
+  video.autoplay = true; video.muted = true; video.playsInline = true;
+  video.style.position='absolute'; video.style.left='-99999px'; video.style.top='-99999px';
+  document.body.appendChild(video);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1280; canvas.height = 720;
+  const ctx = canvas.getContext('2d');
+
+  let sdk=null, rotation=0, mode='fit';
+  const loop = makeRenderLoop(()=>{
+    const w = canvas.clientWidth || canvas.width;
+    const h = canvas.clientHeight || canvas.height;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if(!vw || !vh) return;
+    ctx.save(); ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.translate(canvas.width/2, canvas.height/2);
+    ctx.rotate(rotation*Math.PI/180);
+
+    let videoW=vw, videoH=vh;
+    if(rotation%180!==0) [videoW,videoH] = [videoH,videoW];
+
+    let drawW=w, drawH=h;
+    if(mode==='fit'){
+      const vr=videoW/videoH, cr=w/h;
+      if(vr>cr){ drawW=w; drawH=w/vr; } else { drawH=h; drawW=h*vr; }
+    }
+    const sx=canvas.width/w, sy=canvas.height/h;
+    if(rotation%180===0){ ctx.drawImage(video, -drawW/2*sx, -drawH/2*sy, drawW*sx, drawH*sy); }
+    else { ctx.drawImage(video, -drawH/2*sx, -drawW/2*sy, drawH*sx, drawW*sy); }
+    ctx.restore();
+  });
+
+  async function play(url) {
+    if (sdk) { try { sdk.close(); } catch {}; sdk=null; }
+    // eslint-disable-next-line no-undef
+    sdk = new SrsRtcPlayerAsync();
+    video.srcObject = sdk.stream;
+    await sdk.play(url);
+    loop.start();
+  }
+  function destroy() {
+    try { loop.stop(); } catch {}
+    try { if(sdk){ sdk.close(); sdk=null; } } catch {}
+    try { video.srcObject = null; video.remove(); } catch {}
+    try { canvas.remove(); } catch {}
+  }
+  return { canvas, play, destroy, setMode:(m)=>mode=m, rotate:()=>{rotation=(rotation+90)%360;} };
+}
+
+/* 动态加载 srs.sdk.js（带日志） */
+function ensureSrsSdk() {
+  return new Promise((resolve, reject) => {
+    if (window.SrsRtcPlayerAsync) { console.debug('[SRS] sdk ready'); return resolve(); }
+    const primaryUrl = '/js/srs.sdk.js'; // 如路径不同，请修改
+    const fallbackUrl = 'https://ossrs.net/srs.sdk.js';
+    console.debug('[SRS] load sdk', primaryUrl);
+
+    const s = document.createElement('script');
+    s.src = primaryUrl;
+    s.onload = () => { console.debug('[SRS] primary loaded'); resolve(); };
+    s.onerror = () => {
+      console.warn('[SRS] primary failed, try fallback', fallbackUrl);
+      const s2 = document.createElement('script');
+      s2.src = fallbackUrl;
+      s2.onload = () => { console.debug('[SRS] fallback loaded'); resolve(); };
+      s2.onerror = (e) => { console.error('[SRS] fallback failed', e); reject(e); };
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  });
+}
+
+/* 视频/模式打开到底部网格（带日志与错误提示） */
+async function openVideoInGrid(devId, devNo) {
+  const idx = findFreeMediaSlot();
+  if (idx === -1) { eventBus.emit('toast:show', { type: 'error', message: '没有可用窗口' }); return; }
+  const bodyEl = document.getElementById(`mediaBody${idx}`);
+  const titleEl = document.getElementById(`mediaTitle${idx}`);
+  if (!bodyEl || !titleEl) return;
+
+  try {
+    await ensureSrsSdk();
+  } catch (e) {
+    eventBus.emit('toast:show', { type: 'error', message: '加载 SRS 播放库失败' });
+    return;
+  }
+
+  console.debug('[SRS] play start', { idx, url: SRS_FIXED_URL, devId, devNo });
+
+  const player = createSrsCanvasPlayer();
+  bodyEl.innerHTML = ''; bodyEl.appendChild(player.canvas);
+  titleEl.textContent = `${devNo} 视频`;
+  mediaSlots[idx].type = 'video';
+  mediaSlots[idx].player = player;
+
+  try {
+    await player.play(SRS_FIXED_URL);
+    console.debug('[SRS] play ok', { idx });
+  } catch (e) {
+    console.error('[SRS] play failed', e);
+    titleEl.textContent = `${devNo} 视频(失败)`;
+    eventBus.emit('toast:show', { type: 'error', message: '拉流失败，请检查 webrtc 服务/证书/网络' });
   }
 }
+function openModeInGrid(devId, devNo, modeId) {
+  const idx = findFreeMediaSlot();
+  if (idx === -1) { eventBus.emit('toast:show', { type: 'error', message: '没有可用窗口' }); return; }
+  const bodyEl = document.getElementById(`mediaBody${idx}`);
+  const titleEl = document.getElementById(`mediaTitle${idx}`);
+  if (!bodyEl || !titleEl) return;
 
-function renderSummary(sum) {
-  const el = document.getElementById('summaryChart');
-  if (!el) return;
-  el.innerHTML = sum.stateList.map(item => {
-    const offline = item.total - item.onlineCount;
-    return `
-      <div class="summary-item">
-        <div class="summary-label">${item.typeName}</div>
-        <div class="summary-bars">
-          <div class="bar-online" style="flex:${item.onlineCount||0}">${item.onlineCount}</div>
-          <div class="bar-offline" style="flex:${offline||0}">${offline}</div>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
+  mediaSlots[idx].type = 'mode';
+  mediaSlots[idx].title = `${devNo} 模式`;
+  titleEl.textContent = `${devNo} 模式`;
+  bodyEl.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#0b1119;color:#cfe;">
+    <div style="width:90%;max-width:420px;">
+      <div style="display:flex;justify-content:space-between;margin:6px 0;"><span>倾角X</span><strong id="m${idx}-x">0.00</strong></div>
+      <div style="display:flex;justify-content:space-between;margin:6px 0;"><span>倾角Y</span><strong id="m${idx}-y">0.00</strong></div>
+      <div style="display:flex;justify-content:space-between;margin:6px 0;"><span>倾角Z</span><strong id="m${idx}-z">0.00</strong></div>
+      <div style="display:flex;justify-content:space-between;margin:6px 0;"><span>位移</span><strong id="m${idx}-m">0.000</strong></div>
+      <div style="display:flex;justify-content:space-between;margin:6px 0;"><span>电量</span><strong id="m${idx}-b">100%</strong></div>
+    </div>
+  </div>`;
+  let state = { x: 0, y: 0, z: 0, m: 0.0, b: 100 };
+  const t = setInterval(() => {
+    state.x = clamp(state.x + rand(-0.05,0.05), -5, 5);
+    state.y = clamp(state.y + rand(-0.05,0.05), -5, 5);
+    state.z = clamp(state.z + rand(-0.05,0.05), -5, 5);
+    state.m = Math.max(0, state.m + rand(0.001,0.003));
+    if (state.b > 0 && Math.random() < 0.03) state.b -= 1;
 
-function renderNotifications(list) {
-  const el = document.getElementById('notifyList');
-  if (!el) return;
-  el.innerHTML = list.map(l => {
-    const displayName = l.uname || l.uid;
-    return `<div class="notify-item">${formatTime(l.time)} ${escapeHTML(String(displayName))} ${l.online ? '上线' : '下线'}</div>`;
-  }).join('');
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set(`m${idx}-x`, state.x.toFixed(2));
+    set(`m${idx}-y`, state.y.toFixed(2));
+    set(`m${idx}-z`, state.z.toFixed(2));
+    set(`m${idx}-m`, state.m.toFixed(3));
+    set(`m${idx}-b`, state.b + '%');
+  }, 200);
+  mediaSlots[idx].timer = t;
 }
+function findFreeMediaSlot() { for (const s of mediaSlots) if (!s.type) return s.idx; return -1; }
 
-/* ------- 工具函数 ------- */
-function escapeHTML(str='') {
-  return String(str).replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
-}
+/* ---------- 通用工具 ---------- */
+function escapeHTML(str='') { return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function rand(a,b){return Math.random()*(b-a)+a;}
-function randInt(a,b){return Math.floor(Math.random()*(b-a+1))+a;}
 function clamp(v,min,max){return v<min?min:v>max?max:v;}
 function formatTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
-  const pad = n => n<10?'0'+n:n;
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const d = new Date(ts); const p = n => n<10?'0'+n:n;
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
-function debounce(fn,ms=300){
-  let t=null;
-  return (...args)=>{
-    clearTimeout(t);
-    t=setTimeout(()=>fn(...args),ms);
-  };
-}
-function throttle(fn,ms=100){
-  let t=0, id=null, lastArgs=null;
-  return (...args)=>{
-    const now=Date.now();
-    lastArgs=args;
-    if (now - t >= ms) {
-      t = now;
-      fn(...lastArgs);
-    } else if (!id) {
-      id = setTimeout(()=>{
-        t = Date.now();
-        id = null;
-        fn(...lastArgs);
-      }, ms - (now - t));
-    }
-  };
-}
+function debounce(fn,ms=300){ let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args),ms); }; }
+function throttle(fn,ms=100){ let t=0, id=null, lastArgs=null; return (...args)=>{ const now=Date.now(); lastArgs=args; if (now-t>=ms){ t=now; fn(...lastArgs); } else if(!id){ id=setTimeout(()=>{ t=Date.now(); id=null; fn(...lastArgs); }, ms-(now-t)); } }; }
