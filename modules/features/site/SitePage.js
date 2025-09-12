@@ -1,12 +1,21 @@
 /**
  * 现场管理主页面：
  * - 地图初始化（高德）
- * - 设备树构建
+ * - 设备树构建（用户树 + 设备，树型结构）
+ * - 可拖拽调整左侧树栏宽度（带本地记忆）
  * - 过滤 + 刷新 + 统计 + 通知列表
  * - 设备详情浮层 + 预览窗口管理
  * - 模式数据模拟
+ *
+ * 变更要点（根据你的要求）：
+ * 1) 树根只显示“当前登录用户 本人 + 角色名”，不再出现“用户”字样，也不重复出现同名根节点。
+ *    - 角色名优先使用 currentUser.roleName；否则按 roleId 映射：0 管理员，1 总帐号，2 子帐号，3 测试人员。
+ * 2) 去掉用户行右侧数字徽章；设备行去掉灰点。
+ * 3) 在线为白色，离线为灰色。在线判断直接使用接口返回的 onlineState：
+ *    - 用户：userInfo.onlineState（若缺失则回退按子节点/设备聚合）
+ *    - 设备：devInfo.onlineState
+ * 4) 地图在离开“现场管理”（hash 不包含 /site）时自动销毁，关闭地图浮层；返回后自动重新创建地图。
  */
-/* 只演示顶部 import 已改为别名，其余逻辑与之前版本一致 */
 import { siteState } from '@state/siteState.js';
 import { previewState, computePreviewCapacity } from '@state/previewState.js';
 import {
@@ -21,19 +30,159 @@ import {
 import { eventBus } from '@core/eventBus.js';
 import { ENV } from '@config/env.js';
 import { ensureWS } from '@ws/wsClient.js';
-/* ...其余内容保持原实现... */
 
 let unsubSite;
 let unsubPreview;
 let mapInited = false;
 let mapInstance = null;
 let markersLayer = [];
+let routeWatcher = null;
+
+/* ========== 内联样式（JS 注入） ========== */
+let __SITE_STYLE_INJECTED = false;
+const __SITE_STYLE_ID = 'sitepage-inline-style';
+function injectSiteStylesOnce() {
+  if (__SITE_STYLE_INJECTED || document.getElementById(__SITE_STYLE_ID)) return;
+  const css = `
+  /* 主题变量（暗色） */
+  .site-page {
+    --panel-bg: #0f1720;
+    --panel-bg-2: #0b121a;
+    --panel-line: rgba(255,255,255,0.08);
+    --text-primary: #cfd8dc;
+    --text-dim: #9fb1bb;
+    --chip-hover: #15202b;
+    --toggle-color: #9fb1bb;
+    --border-dash: rgba(255,255,255,0.12);
+    --online-text: #ffffff;
+    --offline-text: #7a8a93;
+  }
+
+  /* 整体三栏布局（左-分隔-中-右） */
+  .site-layout { display:flex; height: 100%; min-height: 100vh; }
+  .site-left {
+    width: var(--site-left-width, 320px);
+    min-width: 240px;
+    max-width: 50vw;
+    background: var(--panel-bg);
+    color: var(--text-primary);
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--panel-line);
+  }
+  .site-splitter {
+    width: 6px;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+    user-select: none;
+  }
+  .site-splitter::after {
+    content:'';
+    position:absolute; top:0; bottom:0; left:2px; width:2px;
+    background: var(--panel-line);
+    transition: background .15s ease;
+  }
+  .site-splitter:hover::after, .site-splitter.dragging::after {
+    background: rgba(93,188,252,.45);
+  }
+  .site-center { flex: 1 1 auto; background: #0a0f14; }
+  .site-right { width: 320px; max-width: 36vw; background: var(--panel-bg-2); color: var(--text-primary); border-left: 1px solid var(--panel-line); }
+
+  /* 过滤条区域（暗色适配） */
+  .filters { padding: 10px 12px; border-bottom: 1px solid var(--panel-line); }
+  .filters label { color: var(--text-dim); }
+  .filters input, .filters select {
+    background: #0b121a; color: var(--text-primary); border: 1px solid var(--panel-line); border-radius: 4px; padding: 4px 6px;
+  }
+  .filters .btn { background: #122133; color: var(--text-primary); border: 1px solid var(--panel-line); }
+  .filters .btn:hover { background: #17314d; }
+
+  /* 仅显示在线：左对齐 */
+  .filters .only-online { text-align: left; }
+  .filters .only-online label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    text-align: left;
+  }
+
+  /* 树容器：允许水平/垂直滚动 */
+  .device-tree {
+    flex: 1 1 auto;
+    overflow: auto;
+    color: var(--text-primary);
+    background: var(--panel-bg);
+  }
+  .gdt-tree { padding: 6px 8px; width: max-content; min-width: 100%; }
+
+  /* 树节点与样式 */
+  .gdt-node { margin-left: 0; }
+  .gdt-node + .gdt-node { margin-top: 6px; }
+  .gdt-row { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; cursor:pointer; user-select:none; }
+  .gdt-row:hover { background:#0e1a24; }
+  .gdt-toggle { width:16px; text-align:center; color: var(--toggle-color); }
+  .gdt-toggle.is-empty { visibility:hidden; }
+  .gdt-icon { width:14px; height:14px; display:inline-block; }
+  .gdt-icon-user { background:linear-gradient(135deg,#6a8,#3a6); border-radius:50%; }
+  .gdt-icon-device { background:linear-gradient(135deg,#88a,#4653d3); border-radius:3px; }
+
+  /* 在线/离线颜色：白/灰（标题和设备行） */
+  .gdt-title { flex:0 1 auto; white-space:nowrap; }
+  .gdt-row.is-online .gdt-title { color: var(--online-text); }
+  .gdt-row.is-offline .gdt-title { color: var(--offline-text); }
+  .gdt-node--device.is-online .gdt-title { color: var(--online-text); }
+  .gdt-node--device.is-offline .gdt-title { color: var(--offline-text); }
+
+  /* 根节点才显示角色名；其他节点不显示“用户”等字样 */
+  .gdt-role { margin-left:6px; font-size:12px; }
+  .gdt-role.role-admin{ color:#ff8a80; }
+  .gdt-role.role-tester{ color:#80d8ff; }
+  .gdt-role.role-owner{ color:#a5d6a7; }
+  .gdt-role.role-sub{ color:#ce93d8; }
+
+  /* 去除右侧徽章（避免误解为 roleId） */
+  .gdt-count { display:none; }
+
+  .gdt-children { margin-left: 18px; border-left:1px dashed var(--border-dash); padding-left: 10px; }
+  .gdt-children.is-collapsed { display:none; }
+
+  .gdt-node--device { padding:2px 6px 2px 22px; display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .gdt-node--device:hover { background:#0e1a24; border-radius:4px; }
+
+  /* 未分组区域 */
+  .gdt-section { margin: 8px 8px 12px; }
+  .gdt-section__title { font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e; border-radius:4px; border: 1px solid var(--panel-line); }
+  .gdt-list { padding:6px 8px; display:flex; flex-direction:column; gap:4px; }
+  .gdt-chip { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:4px; cursor:pointer; background: transparent; border: 1px solid transparent; }
+  .gdt-chip:hover { background: var(--chip-hover); border-color: var(--panel-line); }
+  .gdt-chip .gdt-title { white-space: nowrap; }
+  .gdt-chip.is-online .gdt-title { color: var(--online-text); }
+  .gdt-chip.is-offline .gdt-title { color: var(--offline-text); }
+
+  /* 地图适配 */
+  .map-container { width: 100%; height: 100%; }
+  `;
+  const style = document.createElement('style');
+  style.id = __SITE_STYLE_ID;
+  style.textContent = css;
+  document.head.appendChild(style);
+  __SITE_STYLE_INJECTED = true;
+}
+
+/* ========== 入口挂载 ========== */
+const LS_LEFT_WIDTH_KEY = 'site.left.width';
+const MIN_LEFT_WIDTH = 240;
+const MAX_LEFT_WIDTH_VW = 50;
 
 export function mountSitePage() {
+  injectSiteStylesOnce();
+
   const main = document.getElementById('mainView');
   main.innerHTML = `
     <div class="site-page">
-      <div class="site-layout">
+      <div class="site-layout" id="siteLayout">
         <div class="site-left" id="siteLeft">
           <div class="filters">
             <div>
@@ -51,17 +200,16 @@ export function mountSitePage() {
                 <input id="fltSearch" placeholder="模糊搜索"/>
               </label>
             </div>
-            <div>
+            <div class="only-online">
               <label><input type="checkbox" id="fltOnline"/> 仅显示在线</label>
             </div>
             <div>
               <button class="btn btn-sm" id="btnSiteRefresh">刷新</button>
             </div>
           </div>
-          <div class="device-tree" id="deviceTree">
-            <!-- 树 -->
-          </div>
+          <div class="device-tree" id="deviceTree"><!-- 树 --></div>
         </div>
+        <div class="site-splitter" id="siteSplitter" title="拖动调整左侧宽度"></div>
         <div class="site-center">
           <div id="mapContainer" class="map-container">地图加载中...</div>
         </div>
@@ -80,6 +228,8 @@ export function mountSitePage() {
   `;
   document.getElementById('previewBar').classList.remove('hidden');
 
+  initSplitter();
+
   bindFilters();
   unsubSite = siteState.subscribe(renderSite);
   unsubPreview = previewState.subscribe(renderPreviewBar);
@@ -96,16 +246,129 @@ export function mountSitePage() {
   // 模式模拟器启动
   startModeSimulator();
 
-  return () => {
-    unsubSite && unsubSite();
-    unsubPreview && unsubPreview();
-    stopModeSimulator();
-    document.getElementById('previewBar').classList.add('hidden');
-  };
+  // 离开 /site 自动清理地图与浮层；回到 /site 自动恢复地图
+  setupRouteWatcher();
+
+  // 窗口尺寸变更时，通知地图自适应
+  window.addEventListener('resize', onWindowResize);
 }
 
-export function unmountSitePage() {}
+export function unmountSitePage() {
+  teardownPage();
+}
 
+function teardownPage() {
+  unsubSite && unsubSite();
+  unsubPreview && unsubPreview();
+  unsubSite = unsubPreview = null;
+
+  stopModeSimulator();
+  window.removeEventListener('resize', onWindowResize);
+
+  removeRouteWatcher();
+
+  // 关闭地图与浮层
+  destroyAMap();
+  forceCloseOverlay();
+
+  const bar = document.getElementById('previewBar');
+  if (bar) bar.classList.add('hidden');
+}
+
+/* ========== 路由监听：离开 /site 时清理 ========== */
+function setupRouteWatcher() {
+  removeRouteWatcher();
+  const handler = () => {
+    const isSite = String(location.hash || '').includes('/site');
+    if (!isSite) {
+      // 离开现场管理：销毁地图 + 关闭浮层
+      destroyAMap();
+      forceCloseOverlay();
+    } else {
+      // 回到现场管理：若地图尚未就绪则创建
+      if (!mapInstance) initAMap();
+    }
+  };
+  window.addEventListener('hashchange', handler);
+  routeWatcher = handler;
+  // 首次也检查一次
+  handler();
+}
+function removeRouteWatcher() {
+  if (routeWatcher) {
+    window.removeEventListener('hashchange', routeWatcher);
+    routeWatcher = null;
+  }
+}
+
+/* ========== 左侧栏宽度拖拽 ========== */
+let splitterMoveHandler = null;
+let splitterUpHandler = null;
+
+function initSplitter() {
+  const layout = document.getElementById('siteLayout');
+  const left = document.getElementById('siteLeft');
+  const splitter = document.getElementById('siteSplitter');
+
+  // 读取上次宽度
+  const saved = Number(localStorage.getItem(LS_LEFT_WIDTH_KEY));
+  if (saved && saved >= MIN_LEFT_WIDTH) {
+    left.style.width = saved + 'px';
+    document.documentElement.style.setProperty('--site-left-width', saved + 'px');
+  }
+
+  splitter.addEventListener('mousedown', (e) => {
+    splitter.classList.add('dragging');
+    const bounds = layout.getBoundingClientRect();
+    const maxPx = Math.floor(window.innerWidth * (MAX_LEFT_WIDTH_VW / 100));
+    splitterMoveHandler = (ev) => {
+      const x = ev.clientX - bounds.left;
+      const w = clamp(Math.round(x), MIN_LEFT_WIDTH, maxPx);
+      left.style.width = w + 'px';
+      document.documentElement.style.setProperty('--site-left-width', w + 'px');
+      throttleMapResize();
+    };
+    splitterUpHandler = () => {
+      splitter.classList.remove('dragging');
+      // 保存宽度
+      const w = parseInt(left.style.width || getComputedStyle(left).width, 10);
+      if (w) localStorage.setItem(LS_LEFT_WIDTH_KEY, String(w));
+      // 收尾一次地图 resize
+      if (mapInstance) { try { mapInstance.resize(); } catch(e){} }
+      document.removeEventListener('mousemove', splitterMoveHandler);
+      document.removeEventListener('mouseup', splitterUpHandler);
+      splitterMoveHandler = null;
+      splitterUpHandler = null;
+    };
+    document.addEventListener('mousemove', splitterMoveHandler);
+    document.addEventListener('mouseup', splitterUpHandler);
+    e.preventDefault();
+  });
+}
+
+function destroySplitter() {
+  const splitter = document.getElementById('siteSplitter');
+  if (!splitter) return;
+  splitter.classList.remove('dragging');
+  if (splitterMoveHandler) document.removeEventListener('mousemove', splitterMoveHandler);
+  if (splitterUpHandler) document.removeEventListener('mouseup', splitterUpHandler);
+  splitterMoveHandler = null;
+  splitterUpHandler = null;
+}
+
+function onWindowResize() {
+  if (mapInited && mapInstance) {
+    try { mapInstance.resize(); } catch {}
+  }
+}
+
+const throttleMapResize = throttle(() => {
+  if (mapInited && mapInstance) {
+    try { mapInstance.resize(); } catch {}
+  }
+}, 60);
+
+/* ------- 过滤、数据加载 ------- */
 function bindFilters() {
   const left = document.getElementById('siteLeft');
   left.addEventListener('change', e => {
@@ -148,6 +411,8 @@ function loadBaseData(force = false) {
       }
     });
     loadDeviceTrees();
+  }).catch(err => {
+    console.error('[Site] loadBaseData error', err);
   });
 }
 
@@ -163,6 +428,11 @@ function loadDeviceTrees() {
     });
     buildTree();
     buildMarkers();
+  }).catch(err => {
+    console.error('[Site] loadDeviceTrees error', err);
+    siteState.set({ groupedDevices: [], ungroupedDevices: [] });
+    buildTree();
+    buildMarkers();
   });
 }
 
@@ -175,6 +445,8 @@ function loadSummary() {
         stateList: summary.stateList || []
       }
     });
+  }).catch(err => {
+    console.error('[Site] loadSummary error', err);
   });
 }
 
@@ -191,93 +463,312 @@ function fillDevModeSelect(list) {
   sel.value = cur || '0';
 }
 
-/* ------- 树构建 (简化版) ------- */
-function buildTree() {
-  const treeEl = document.getElementById('deviceTree');
-  const { groupedDevices, ungroupedDevices, filters } = siteState.get();
+/* ------- 角色映射与当前用户 ------- */
+// REPLACE: 角色映射常量
+const ROLE_ID_MAP = window.__ROLE_ID_MAP || {
+  0: { key: 'admin',  label: '管理员' },
+  1: { key: 'tester', label: '测试人员' },
+  2: { key: 'owner',  label: '总帐号' },
+  3: { key: 'sub',    label: '子帐号' }
+};
 
-  // 构建用户ID -> 子设备数组
-  const userMap = new Map();
-  groupedDevices.forEach(entry => {
-    const ui = entry.userInfo;
-    if (!ui) return;
-    if (!userMap.has(ui.userId)) userMap.set(ui.userId, { user: ui, devices: [] });
-    userMap.get(ui.userId).devices.push(entry.devInfo);
-  });
-
-  // 简化：不做多层父子递归，仅平铺（可后续扩展 parentUserId）
-  let html = '<div class="tree-section"><div class="tree-title">已分组设备</div>';
-  userMap.forEach(v => {
-    html += `<div class="tree-user">
-      <div class="tree-user-title">${v.user.userName} (${v.devices.length})</div>
-      <div class="tree-devices">
-        ${v.devices.map(d => `<div class="tree-device" data-devid="${d.id}" title="${d.no}">
-          ${d.no} ${d.onlineState ? '<span class="dot dot-green"></span>' : '<span class="dot dot-gray"></span>'}
-        </div>`).join('')}
-      </div>
-    </div>`;
-  });
-  html += '</div>';
-
-  html += `<div class="tree-section"><div class="tree-title">未分组设备(${ungroupedDevices.length})</div>
-    <div class="tree-devices">
-      ${ungroupedDevices.map(e => {
-        const d = e.devInfo;
-        return `<div class="tree-device" data-devid="${d.id}">
-          ${d.no} ${d.onlineState ? '<span class="dot dot-green"></span>' : '<span class="dot dot-gray"></span>'}
-        </div>`;
-      }).join('')}
-    </div>
-  </div>`;
-
-  treeEl.innerHTML = html;
-
-  treeEl.querySelectorAll('.tree-device').forEach(div => {
-    div.addEventListener('click', () => {
-      const devId = Number(div.getAttribute('data-devid'));
-      openDeviceOverlay(devId);
-    });
-  });
+// REPLACE: roleKey 与 getRoleDisplay
+function roleKey(raw) {
+  const s = String(raw ?? '').toLowerCase();
+  if (['0','admin','管理员'].includes(s)) return 'admin';
+  if (['1','tester','测试人员'].includes(s)) return 'tester';
+  if (['2','owner','main','总帐号','root'].includes(s)) return 'owner';
+  if (['3','sub','子帐号','child'].includes(s)) return 'sub';
+  return 'user';
 }
 
-/* ------- 地图 (高德) 初始化简化占位 ------- */
+function getRoleDisplay(cu) {
+  // 优先后端给的中文 roleName
+  if (cu?.roleName) return { key: roleKey(cu.roleName), label: cu.roleName };
+  // 其次按 roleId 映射
+  if (cu?.roleId != null && ROLE_ID_MAP[cu.roleId]) return ROLE_ID_MAP[cu.roleId];
+  // 最后回退 role 字段
+  const key = roleKey(cu?.role);
+  const label = ({admin:'管理员', tester:'测试人员', owner:'总帐号', sub:'子帐号', user:'用户'})[key] || '用户';
+  return { key, label };
+}
+
+function getCurrentUser() {
+  if (window.__currentUser && (window.__currentUser.userId != null)) return window.__currentUser;
+  try {
+    const cu = siteState.get().currentUser;
+    if (cu && cu.userId != null) return cu;
+  } catch(e){}
+  return { userId: null, roleId: 0, role: 'admin', roleName: '管理员', userName: '管理员' };
+}
+
+/* ------- 树构建（用户树 + 设备） ------- */
+// REPLACE: 规范化用户信息（保留 onlineState）
+function normalizeUserInfo(ui) {
+  if (!ui) return null;
+  return {
+    userId: ui.userId ?? ui.id,
+    userName: ui.userName ?? ui.name ?? '',
+    parentUserId: ui.parentUserId ?? ui.pid ?? null,
+    role: ui.role ?? ui.userRole ?? ui.type,
+    roleId: ui.roleId != null ? Number(ui.roleId) : undefined,
+    roleName: ui.roleName,
+    onlineState: typeof ui.onlineState === 'boolean' ? ui.onlineState : undefined
+  };
+}
+
+// REPLACE: 构建用户森林（强制以当前用户为唯一根，并过滤上级）
+function buildUserForestFromGroupedDevices(groupedDevices) {
+  const userMap = new Map();
+
+  // 1) 收集用户节点（带 userInfo.onlineState）
+  groupedDevices.forEach(entry => {
+    const ui = normalizeUserInfo(entry.userInfo);
+    if (!ui || ui.userId == null) return;
+    if (!userMap.has(ui.userId)) {
+      userMap.set(ui.userId, { ...ui, type: 'user', children: [], deviceChildren: [], isOnline: ui.onlineState });
+    } else {
+      const cur = userMap.get(ui.userId);
+      userMap.set(ui.userId, {
+        ...cur,
+        userName: cur.userName || ui.userName,
+        role: cur.role || ui.role,
+        roleId: cur.roleId ?? ui.roleId,
+        roleName: cur.roleName || ui.roleName,
+        parentUserId: cur.parentUserId ?? ui.parentUserId,
+        isOnline: typeof cur.isOnline === 'boolean' ? cur.isOnline : ui.onlineState
+      });
+    }
+  });
+
+  // 2) 如果当前用户不在 userMap，补一个“合成的根节点”
+  const cu = getCurrentUser();
+  if (cu?.userId != null && !userMap.has(cu.userId)) {
+    userMap.set(cu.userId, {
+      userId: cu.userId,
+      userName: cu.userName || '',
+      parentUserId: null, // 作为根，不连接上级
+      role: cu.role,
+      roleId: cu.roleId,
+      roleName: cu.roleName,
+      type: 'user',
+      children: [],
+      deviceChildren: [],
+      isOnline: undefined
+    });
+  }
+
+  // 3) 附加设备（devInfo.onlineState）
+  groupedDevices.forEach(entry => {
+    const ui = normalizeUserInfo(entry.userInfo);
+    const di = entry.devInfo || {};
+    if (!ui || ui.userId == null || di == null) return;
+    const node = userMap.get(ui.userId);
+    if (!node) return;
+    node.deviceChildren.push({
+      type: 'device',
+      devId: di.id,
+      devName: di.no || di.name || String(di.id || ''),
+      onlineState: !!di.onlineState,
+      raw: di
+    });
+  });
+
+  // 4) 建立父子关系（以 userMap 中的节点为准）
+  userMap.forEach(node => { node.children = node.children || []; });
+  userMap.forEach(node => {
+    const pid = node.parentUserId;
+    if (pid != null && userMap.has(pid)) {
+      userMap.get(pid).children.push(node);
+    }
+  });
+
+  // 5) 在线聚合：若用户 isOnline 未给，则按子/设备聚合
+  function computeOnline(n) {
+    if (typeof n.isOnline === 'boolean') return n.isOnline;
+    let online = n.deviceChildren?.some(d => d.onlineState) || false;
+    if (n.children?.length) {
+      for (const c of n.children) online = computeOnline(c) || online;
+    }
+    n.isOnline = online;
+    return online;
+  }
+  userMap.forEach(n => computeOnline(n));
+
+  // 6) 以“当前用户”为唯一根，并过滤掉其上级
+  const selfNode = cu?.userId != null ? userMap.get(cu.userId) : null;
+  if (selfNode) {
+    // 确保根节点不指向上级
+    selfNode.parentUserId = null;
+    return { roots: [selfNode], userMap, currentUser: cu };
+  }
+
+  // 兜底：没有当前用户节点时，按接口顶层（极少发生）
+  const roots = [];
+  userMap.forEach(n => { if (n.parentUserId == null || !userMap.has(n.parentUserId)) roots.push(n); });
+  return { roots, userMap, currentUser: cu };
+}
+
+// REPLACE: 渲染用户节点（根节点显示当前登录用户角色）
+function renderUserNodeHTML(node, level = 1, expandLevel = 2, rootRoleDisp = null) {
+  const hasChildren = (node.children && node.children.length) || (node.deviceChildren && node.deviceChildren.length);
+  const expanded = level <= expandLevel;
+  const rowOnlineCls = node.isOnline ? 'is-online' : 'is-offline';
+
+  const roleSpan = (level === 1 && rootRoleDisp)
+    ? `<span class="gdt-role role-${rootRoleDisp.key}">${escapeHTML(rootRoleDisp.label)}</span>`
+    : '';
+
+  const header = `
+    <div class="gdt-row ${rowOnlineCls}" data-node-type="user" data-user-id="${node.userId}">
+      <span class="gdt-toggle ${hasChildren ? '' : 'is-empty'}">${hasChildren ? (expanded ? '▾' : '▸') : ''}</span>
+      <span class="gdt-icon gdt-icon-user"></span>
+      <span class="gdt-title" title="${escapeHTML(node.userName)}">${escapeHTML(node.userName || '(未命名用户)')}</span>
+      ${roleSpan}
+      <span class="gdt-count"></span>
+    </div>
+  `;
+
+  const childrenHTML = `
+    <div class="gdt-children ${expanded ? '' : 'is-collapsed'}">
+      ${(node.children || []).map(child => renderUserNodeHTML(child, level + 1, expandLevel, rootRoleDisp)).join('')}
+      ${(node.deviceChildren || []).map(d => `
+        <div class="gdt-node gdt-node--device ${d.onlineState ? 'is-online' : 'is-offline'}" data-devid="${d.devId}">
+          <span class="gdt-icon gdt-icon-device"></span>
+          <span class="gdt-title" title="${escapeHTML(d.devName)}">${escapeHTML(d.devName)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  return `<div class="gdt-node gdt-node--user" data-user-id="${node.userId}">${header}${hasChildren ? childrenHTML : ''}</div>`;
+}
+
+// REPLACE: 构建并渲染整棵树（根角色名从 currentUser.roleId/roleName 决定）
+function buildTree() {
+  const treeEl = document.getElementById('deviceTree');
+  const { groupedDevices, ungroupedDevices } = siteState.get();
+
+  const { roots, currentUser } = buildUserForestFromGroupedDevices(groupedDevices);
+  const rootRoleDisp = getRoleDisplay(currentUser); // { key, label }
+
+  const expandLevel = 2;
+  const treeHTML = `
+    <div class="gdt-tree">
+      ${roots.map(root => renderUserNodeHTML(root, 1, expandLevel, rootRoleDisp)).join('')}
+    </div>
+    <div class="gdt-section">
+      <div class="gdt-section__title">未分组设备 (${ungroupedDevices.length})</div>
+      <div class="gdt-list">
+        ${ungroupedDevices.map(e => {
+          const d = e.devInfo || {};
+          const name = d.no || d.name || String(d.id || '');
+          const cls = d.onlineState ? 'is-online' : 'is-offline';
+          return `
+            <div class="gdt-chip ${cls}" data-devid="${d.id}" title="${escapeHTML(name)}">
+              <span class="gdt-icon gdt-icon-device"></span>
+              <span class="gdt-title">${escapeHTML(name)}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+  treeEl.innerHTML = treeHTML;
+
+  treeEl.addEventListener('click', (e) => {
+    const row = e.target.closest('.gdt-row');
+    if (row && treeEl.contains(row)) {
+      const nodeEl = row.parentElement;
+      const children = nodeEl.querySelector(':scope > .gdt-children');
+      const toggle = row.querySelector('.gdt-toggle');
+      if (children) {
+        const collapsed = children.classList.toggle('is-collapsed');
+        if (toggle) toggle.textContent = collapsed ? '▸' : '▾';
+      }
+      return;
+    }
+    const devEl = e.target.closest('[data-devid]');
+    if (devEl && treeEl.contains(devEl)) {
+      const devId = Number(devEl.getAttribute('data-devid'));
+      if (!Number.isNaN(devId)) openDeviceOverlay(devId);
+    }
+  }, { passive: true });
+}
+
+/* ------- 地图 (高德) ------- */
 function initAMap() {
-  if (mapInited) return;
-  // 动态加载高德脚本
+  if (mapInstance) return; // 已存在
+  // 若脚本已加载，直接初始化；否则加载脚本
+  if (window.AMap) {
+    createMap();
+    return;
+  }
   const script = document.createElement('script');
   script.src = `https://webapi.amap.com/maps?v=2.0&key=${ENV.AMAP_KEY}`;
   script.onload = () => {
-    mapInstance = new AMap.Map('mapContainer', {
-      zoom: 5,
-      center: [105.0, 35.0]
-    });
-    mapInited = true;
-    buildMarkers();
+    try { createMap(); } catch (e) { console.error('[Site] AMap init error', e); }
+  };
+  script.onerror = (e) => {
+    console.error('[Site] AMap script load error', e);
   };
   document.head.appendChild(script);
 }
 
+function createMap() {
+  try {
+    // eslint-disable-next-line no-undef
+    mapInstance = new AMap.Map('mapContainer', { zoom: 5, center: [105.0, 35.0] });
+    mapInited = true;
+    buildMarkers();
+  } catch (e) {
+    console.error('[Site] createMap error', e);
+  }
+}
+
 function buildMarkers() {
-  if (!mapInited) return;
-  // 清除旧 marker
-  markersLayer.forEach(m => m.setMap(null));
+  if (!mapInstance) return;
+  markersLayer.forEach(m => { try { m.setMap(null); } catch {} });
   markersLayer = [];
   const { groupedDevices, ungroupedDevices } = siteState.get();
   const all = [...groupedDevices, ...ungroupedDevices];
   all.forEach(e => {
     const d = e.devInfo;
-    if (!d.lastLocation || d.lastLocation.lng == null || d.lastLocation.lat == null) return;
-    const marker = new AMap.Marker({
-      position: [d.lastLocation.lng, d.lastLocation.lat],
-      title: d.no
-    });
+    if (!d || !d.lastLocation || d.lastLocation.lng == null || d.lastLocation.lat == null) return;
+    // eslint-disable-next-line no-undef
+    const marker = new AMap.Marker({ position: [d.lastLocation.lng, d.lastLocation.lat], title: d.no });
     marker.on('click', () => openDeviceOverlay(d.id));
     marker.setMap(mapInstance);
     markersLayer.push(marker);
   });
 }
 
-/* ------- 设备详情浮层 (简化) ------- */
+function destroyAMap() {
+  try {
+    if (markersLayer.length) {
+      markersLayer.forEach(m => { try { m.setMap(null); } catch {} });
+    }
+  } catch {}
+  markersLayer = [];
+  if (mapInstance) {
+    try { mapInstance.destroy(); } catch {}
+    mapInstance = null;
+  }
+  mapInited = false;
+  const mc = document.getElementById('mapContainer');
+  if (mc) mc.innerHTML = '';
+}
+
+/* ------- 设备详情浮层 ------- */
+function forceCloseOverlay() {
+  try {
+    const st = siteState.get().overlay || {};
+    if (st.open) siteState.set({ overlay: { ...st, open: false } });
+  } catch {}
+  const root = document.getElementById('overlayRoot');
+  if (root) root.innerHTML = '';
+}
+
 function openDeviceOverlay(devId) {
   apiDeviceInfo(devId).then(data => {
     const info = data.devInfo;
@@ -290,11 +781,15 @@ function openDeviceOverlay(devId) {
       }
     });
     renderOverlay(info);
+  }).catch(err => {
+    console.error('[Site] apiDeviceInfo error', err);
+    eventBus.emit('toast:show', { type: 'error', message: '获取设备信息失败' });
   });
 }
 
 function renderOverlay(info) {
   const root = document.getElementById('overlayRoot');
+  if (!root) return;
   root.innerHTML = `
     <div class="overlay-card">
       <div class="overlay-card__close" id="ovClose">×</div>
@@ -370,7 +865,7 @@ function openVideoPreview(devId, devNo, streamType) {
       status: 'connecting',
       order,
       createdAt: Date.now(),
-      player: null,     // 挂载播放实例
+      player: null,
       streamUrl: streamType === 'main'
         ? 'webrtc://media.szdght.com/1/camera_audio'
         : 'webrtc://media.szdght.com/1/screen'
@@ -446,7 +941,7 @@ function openModePreview(devId, devNo, modeId, modeList=[]) {
 function renderPreviewBar(pState) {
   const bar = document.getElementById('previewBarInner');
   computePreviewCapacity(); // 每次刷新重新确保容量的一致性
-  const { capacity, windows } = pState;
+  const { windows } = pState;
   bar.innerHTML = windows
     .sort((a,b) => a.order - b.order)
     .map(w => previewWindowHTML(w))
@@ -501,8 +996,7 @@ function formatModeMetrics(metrics) {
   `;
 }
 
-
-// 拖拽交换
+/* ------- 预览条拖拽交换 ------- */
 function enableDrag(winEl) {
   winEl.addEventListener('dragstart', e => {
     e.dataTransfer.setData('text/plain', winEl.getAttribute('data-id'));
@@ -580,7 +1074,8 @@ function renderSite(s) {
   renderSummary(s.summary);
   renderNotifications(s.notifications);
   if (!s.overlay.open) {
-    document.getElementById('overlayRoot').innerHTML = '';
+    const or = document.getElementById('overlayRoot');
+    if (or) or.innerHTML = '';
   }
 }
 
@@ -605,19 +1100,17 @@ function renderNotifications(list) {
   const el = document.getElementById('notifyList');
   if (!el) return;
   el.innerHTML = list.map(l => {
-    // 3.21 接口新增 uname，优先显示；兼容旧数据回退 uid
     const displayName = l.uname || l.uid;
     return `<div class="notify-item">${formatTime(l.time)} ${escapeHTML(String(displayName))} ${l.online ? '上线' : '下线'}</div>`;
   }).join('');
 }
 
-// 若文件中尚无 escapeHTML 工具，请追加；已有则可忽略
+/* ------- 工具函数 ------- */
 function escapeHTML(str='') {
-  return str.replace(/[&<>"']/g, c => ({
+  return String(str).replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
 }
-/* ------- 工具函数 ------- */
 function rand(a,b){return Math.random()*(b-a)+a;}
 function randInt(a,b){return Math.floor(Math.random()*(b-a+1))+a;}
 function clamp(v,min,max){return v<min?min:v>max?max:v;}
@@ -632,5 +1125,22 @@ function debounce(fn,ms=300){
   return (...args)=>{
     clearTimeout(t);
     t=setTimeout(()=>fn(...args),ms);
+  };
+}
+function throttle(fn,ms=100){
+  let t=0, id=null, lastArgs=null;
+  return (...args)=>{
+    const now=Date.now();
+    lastArgs=args;
+    if (now - t >= ms) {
+      t = now;
+      fn(...lastArgs);
+    } else if (!id) {
+      id = setTimeout(()=>{
+        t = Date.now();
+        id = null;
+        fn(...lastArgs);
+      }, ms - (now - t));
+    }
   };
 }
