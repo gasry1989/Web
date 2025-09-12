@@ -465,6 +465,7 @@ function fillDevModeSelect(list) {
 
 /* ------- 角色映射与当前用户 ------- */
 // REPLACE: 角色映射常量
+// 0=管理员，1=测试人员，2=总帐号，3=子帐号
 const ROLE_ID_MAP = window.__ROLE_ID_MAP || {
   0: { key: 'admin',  label: '管理员' },
   1: { key: 'tester', label: '测试人员' },
@@ -472,9 +473,10 @@ const ROLE_ID_MAP = window.__ROLE_ID_MAP || {
   3: { key: 'sub',    label: '子帐号' }
 };
 
-// REPLACE: roleKey 与 getRoleDisplay
+// PATCH: 角色工具
 function roleKey(raw) {
   const s = String(raw ?? '').toLowerCase();
+  // 注意：这里的 '1' 映射为 tester，'2' 映射为 owner，'3' 映射为 sub
   if (['0','admin','管理员'].includes(s)) return 'admin';
   if (['1','tester','测试人员'].includes(s)) return 'tester';
   if (['2','owner','main','总帐号','root'].includes(s)) return 'owner';
@@ -482,28 +484,64 @@ function roleKey(raw) {
   return 'user';
 }
 
-function getRoleDisplay(cu) {
-  // 优先后端给的中文 roleName
-  if (cu?.roleName) return { key: roleKey(cu.roleName), label: cu.roleName };
-  // 其次按 roleId 映射
-  if (cu?.roleId != null && ROLE_ID_MAP[cu.roleId]) return ROLE_ID_MAP[cu.roleId];
-  // 最后回退 role 字段
-  const key = roleKey(cu?.role);
-  const label = ({admin:'管理员', tester:'测试人员', owner:'总帐号', sub:'子帐号', user:'用户'})[key] || '用户';
+function getRoleDisplay(u) {
+  if (!u) return { key: 'user', label: '用户' };
+  // 1) 优先 roleId
+  if (u.roleId != null && ROLE_ID_MAP[u.roleId]) return ROLE_ID_MAP[u.roleId];
+  // 2) 再看 roleName
+  if (u.roleName) return { key: roleKey(u.roleName), label: u.roleName };
+  // 3) 最后看 role
+  const key = roleKey(u.role);
+  const label = ({ admin:'管理员', tester:'测试人员', owner:'总帐号', sub:'子帐号', user:'用户' })[key] || '用户';
   return { key, label };
 }
-
-function getCurrentUser() {
-  if (window.__currentUser && (window.__currentUser.userId != null)) return window.__currentUser;
+// PATCH: 读取 localStorage 的当前用户（尽量兼容不同项目的存储 key）
+function readCurrentUserFromStorage() {
+  const keys = [
+    'currentUser', 'auth.currentUser', 'auth_user',
+    'USER_INFO', 'USER', 'loginUser', 'user'
+  ];
+  for (const k of keys) {
+    try {
+      const v = localStorage.getItem(k);
+      if (!v) continue;
+      const obj = typeof v === 'string' ? JSON.parse(v) : v;
+      if (obj && obj.userId != null) return obj;
+    } catch (e) {
+      // 有些项目把纯对象字符串化方式不同，尝试直接返回
+      try { if (v && v.userId != null) return v; } catch {}
+    }
+  }
+  return null;
+}
+// PATCH: 严格版当前用户获取（不返回“管理员兜底”），用于决定树根与角色显示
+function getCurrentUserStrict() {
   try {
-    const cu = siteState.get().currentUser;
-    if (cu && cu.userId != null) return cu;
+    const st = siteState.get();
+    if (st?.currentUser?.userId != null) return st.currentUser;
   } catch(e){}
+  if (window.__currentUser?.userId != null) return window.__currentUser;
+
+  const fromLS = readCurrentUserFromStorage();
+  if (fromLS?.userId != null) {
+    // 顺便灌回状态，后续就稳定了
+    try { siteState.set({ currentUser: fromLS }); } catch {}
+    return fromLS;
+  }
+  return null; // 严格：拿不到就返回 null，不用“管理员”兜底
+}
+// PATCH: （保留原有 getCurrentUser 以兼容其他调用）
+// 如仍有旧代码依赖兜底，这里保留“仅用于显示”的管理员 fallback，
+// 但树构建与角色标签一律使用 getCurrentUserStrict。
+function getCurrentUser() {
+  const strict = getCurrentUserStrict();
+  if (strict) return strict;
+  // 仅用于兜底显示，不参与树根选择
   return { userId: null, roleId: 0, role: 'admin', roleName: '管理员', userName: '管理员' };
 }
 
 /* ------- 树构建（用户树 + 设备） ------- */
-// REPLACE: 规范化用户信息（保留 onlineState）
+// PATCH: 规范化用户信息（带 onlineState）
 function normalizeUserInfo(ui) {
   if (!ui) return null;
   return {
@@ -645,12 +683,15 @@ function renderUserNodeHTML(node, level = 1, expandLevel = 2, rootRoleDisp = nul
 }
 
 // REPLACE: 构建并渲染整棵树（根角色名从 currentUser.roleId/roleName 决定）
+// REPLACE: 构建并渲染整棵树（隐藏根用户角色名称）
 function buildTree() {
   const treeEl = document.getElementById('deviceTree');
   const { groupedDevices, ungroupedDevices } = siteState.get();
 
-  const { roots, currentUser } = buildUserForestFromGroupedDevices(groupedDevices);
-  const rootRoleDisp = getRoleDisplay(currentUser); // { key, label }
+  const { roots /*, currentUser */ } = buildUserForestFromGroupedDevices(groupedDevices);
+
+  // 关键：把 rootRoleDisp 设为 null，即可隐藏根用户角色名
+  const rootRoleDisp = null;
 
   const expandLevel = 2;
   const treeHTML = `
@@ -679,7 +720,7 @@ function buildTree() {
   treeEl.addEventListener('click', (e) => {
     const row = e.target.closest('.gdt-row');
     if (row && treeEl.contains(row)) {
-      const nodeEl = row.parentElement;
+      const nodeEl = row.parentElement; // .gdt-node--user
       const children = nodeEl.querySelector(':scope > .gdt-children');
       const toggle = row.querySelector('.gdt-toggle');
       if (children) {
