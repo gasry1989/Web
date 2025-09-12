@@ -34,7 +34,7 @@ export function showDeviceOverviewModal(opt={}) {
   if (exist) {
     if (opt.userIds) state.filters.userIds = Array.isArray(opt.userIds)?opt.userIds:[];
     loadPage(1, { silentLoading:false });
-    exist.open();
+    exist.open && exist.open();
     return;
   }
   state.filters.userIds = Array.isArray(opt.userIds)?opt.userIds:[];
@@ -73,7 +73,15 @@ function createAndOpen() {
     title:'设备概览',
     width,
     content,
-    footerButtons:[{ text:'关闭', onClick: close=>{ close(); modalRef=null; } }]
+    footerButtons:[{
+      text:'关闭',
+      onClick: close => {
+        close && close();
+        // 可选：移除监听
+        window.removeEventListener('resize', onResize);
+        modalRef = null;
+      }
+    }]
   });
   if (!modalRef) return;
   bindEvents();
@@ -87,9 +95,9 @@ function bindEvents() {
 
 function onResize() {
   const m = getModal('deviceOverviewModal');
-  if (!m) return;
+  if (!m || !m.wrap) return;     // 修复点：原来使用 m.el，现在使用 m.wrap
   const width = Math.min(Math.floor(window.innerWidth * 0.8), MAX_WIDTH);
-  m.el.style.width = width + 'px';
+  m.wrap.style.width = width + 'px';
 }
 
 function loadPage(pageIndex, { silentLoading }) {
@@ -128,6 +136,7 @@ function loadPage(pageIndex, { silentLoading }) {
     }
   }).finally(() => {
     state.loading = false;
+    const mask = modalRef?.body.querySelector('#devLoadingMask');
     if (mask) mask.style.display = 'none';
   });
 }
@@ -149,7 +158,6 @@ function renderPager() {
   const { pageIndex, pageTotal, total } = state.listInfo;
   const pages = buildPageWindow(pageIndex, pageTotal, 2);
   const pagerEl = modalRef.body.querySelector('#devPager');
-  // 始终显示分页结构
   pagerEl.innerHTML = `
     <button class="pg-btn" data-pg="prev" ${pageIndex===1?'disabled':''}>&lt;</button>
     ${pages.map(p=>`<button class="pg-btn ${p===pageIndex?'active':''}" data-pg="${p}">${p}</button>`).join('')}
