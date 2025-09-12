@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>SitePage 播放与调试页</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;margin:12px;}
+    .row{display:flex;gap:8px;margin-bottom:8px;align-items:center;}
+    input[type=text]{width:360px;max-width:60vw;padding:6px;border:1px solid #ccc;border-radius:4px;}
+    button{padding:6px 12px;border:0;border-radius:4px;background:#2d8cff;color:#fff;cursor:pointer;}
+    button:hover{background:#1474e2;}
+    #video_container{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;}
+    .pane{background:#000;position:relative;border:1px solid #222;border-radius:4px;overflow:hidden;}
+    .pane video{display:block;width:640px;max-width:88vw;height:auto;background:#000;}
+    .pane .title{position:absolute;left:8px;top:6px;color:#fff;background:rgba(0,0,0,.45);padding:3px 6px;border-radius:3px;font-size:12px;}
+  </style>
+</head>
+<body>
+  <div class="row">
+    <input id="url_main" type="text" placeholder="主流播放地址，如 webrtc://host/app/stream">
+    <button id="btn_start_main">打开视频</button>
+    <button id="btn_stop_main" style="background:#999;display:none;">停止主流</button>
+  </div>
+  <div class="row">
+    <input id="url_sub" type="text" placeholder="副流播放地址（可选）">
+    <button id="btn_start_sub">打开副流</button>
+    <button id="btn_stop_sub" style="background:#999;display:none;">停止副流</button>
+  </div>
+
+  <div id="video_container">
+    <div class="pane" id="pane_main" style="display:none;">
+      <div class="title">主流</div>
+      <video id="v_main" autoplay playsinline></video>
+    </div>
+    <div class="pane" id="pane_sub" style="display:none;">
+      <div class="title">副流</div>
+      <video id="v_sub" autoplay playsinline></video>
+    </div>
+  </div>
+
+  <!-- 顺序必须：adapter -> srs.sdk -> SitePage.js -->
+  <script src="js/adapter-7.4.0.min.js"></script>
+  <script src="js/srs.sdk.js"></script>
+  <script src="js/SitePage.js"></script>
+</body>
+</html>

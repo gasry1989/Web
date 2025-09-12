@@ -711,11 +711,47 @@ function closeMediaSlot(idx) {
   if (bodyEl) bodyEl.innerHTML = `<div class="media-placeholder">在此显示视频流或模式</div>`;
 }
 
-/* SRS 播放器封装（基于 rtc_player7.html 思路：video+canvas 渲染） */
-function makeRenderLoop(draw){ let run=false; function loop(){ if(!run) return; draw(); requestAnimationFrame(loop); } return { start(){ if(!run){run=true; requestAnimationFrame(loop);} }, stop(){ run=false; } }; }
+/* ---------- WebRTC 依赖加载（adapter + srs.sdk） ---------- */
+function ensureAdapter() {
+  return new Promise((resolve) => {
+    if (window.adapter) return resolve();
+    const s = document.createElement('script');
+    s.src = '/js/adapter-7.4.0.min.js'; // 与你 SitePage.html 一致的路径
+    s.onload = () => resolve();
+    s.onerror = () => resolve(); // 失败也不阻塞（Chrome 一般无须 adapter）
+    document.head.appendChild(s);
+  });
+}
+function ensureSrsSdk() {
+  return new Promise((resolve, reject) => {
+    if (window.SrsRtcPlayerAsync) return resolve();
+    const primaryUrl = '/js/srs.sdk.js';
+    const fallbackUrl = 'https://ossrs.net/srs.sdk.js';
+    const s = document.createElement('script');
+    s.src = primaryUrl;
+    s.onload = () => resolve();
+    s.onerror = () => {
+      const s2 = document.createElement('script');
+      s2.src = fallbackUrl;
+      s2.onload = () => resolve();
+      s2.onerror = (e) => reject(e);
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  });
+}
+async function ensureWebRTCDeps() {
+  await ensureAdapter();
+  await ensureSrsSdk();
+}
+
+/* ---------- SRS 播放器（video+canvas 渲染） ---------- */
+function makeRenderLoop(draw){ let run=false; function loop(){ if(!run) return; draw(); requestAnimationFrame(loop);} return { start(){ if(!run){run=true; requestAnimationFrame(loop);} }, stop(){ run=false; } }; }
 function createSrsCanvasPlayer() {
   const video = document.createElement('video');
-  video.autoplay = true; video.muted = true; video.playsInline = true;
+  // 有用户点击手势，允许声音；如需静音可改为 true
+  video.autoplay = true; video.muted = false; video.playsInline = true;
+  // 放到屏幕外，避免闪烁
   video.style.position='absolute'; video.style.left='-99999px'; video.style.top='-99999px';
   document.body.appendChild(video);
 
@@ -729,6 +765,7 @@ function createSrsCanvasPlayer() {
     const h = canvas.clientHeight || canvas.height;
     const vw = video.videoWidth, vh = video.videoHeight;
     if(!vw || !vh) return;
+
     ctx.save(); ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.translate(canvas.width/2, canvas.height/2);
     ctx.rotate(rotation*Math.PI/180);
@@ -748,12 +785,16 @@ function createSrsCanvasPlayer() {
   });
 
   async function play(url) {
+    if (!url) throw new Error('empty url');
     if (sdk) { try { sdk.close(); } catch {}; sdk=null; }
     // eslint-disable-next-line no-undef
     sdk = new SrsRtcPlayerAsync();
     video.srcObject = sdk.stream;
+
+    // 调用 sdk.play；随后再显式 video.play() 以兼容性兜底
     await sdk.play(url);
     loop.start();
+    try { await video.play(); } catch {}
   }
   function destroy() {
     try { loop.stop(); } catch {}
@@ -764,30 +805,7 @@ function createSrsCanvasPlayer() {
   return { canvas, play, destroy, setMode:(m)=>mode=m, rotate:()=>{rotation=(rotation+90)%360;} };
 }
 
-/* 动态加载 srs.sdk.js（带日志） */
-function ensureSrsSdk() {
-  return new Promise((resolve, reject) => {
-    if (window.SrsRtcPlayerAsync) { console.debug('[SRS] sdk ready'); return resolve(); }
-    const primaryUrl = '/js/srs.sdk.js'; // 如路径不同，请修改
-    const fallbackUrl = 'https://ossrs.net/srs.sdk.js';
-    console.debug('[SRS] load sdk', primaryUrl);
-
-    const s = document.createElement('script');
-    s.src = primaryUrl;
-    s.onload = () => { console.debug('[SRS] primary loaded'); resolve(); };
-    s.onerror = () => {
-      console.warn('[SRS] primary failed, try fallback', fallbackUrl);
-      const s2 = document.createElement('script');
-      s2.src = fallbackUrl;
-      s2.onload = () => { console.debug('[SRS] fallback loaded'); resolve(); };
-      s2.onerror = (e) => { console.error('[SRS] fallback failed', e); reject(e); };
-      document.head.appendChild(s2);
-    };
-    document.head.appendChild(s);
-  });
-}
-
-/* 视频/模式打开到底部网格（带日志与错误提示） */
+/* ---------- 视频/模式打开到底部网格 ---------- */
 async function openVideoInGrid(devId, devNo) {
   const idx = findFreeMediaSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type: 'error', message: '没有可用窗口' }); return; }
@@ -796,16 +814,19 @@ async function openVideoInGrid(devId, devNo) {
   if (!bodyEl || !titleEl) return;
 
   try {
-    await ensureSrsSdk();
+    // 关键：播放前确保 adapter + srs.sdk 已加载
+    await ensureWebRTCDeps();
   } catch (e) {
-    eventBus.emit('toast:show', { type: 'error', message: '加载 SRS 播放库失败' });
+    console.error('[SRS] load deps failed', e);
+    eventBus.emit('toast:show', { type: 'error', message: '加载 WebRTC 依赖失败（adapter/srs.sdk）' });
     return;
   }
 
   console.debug('[SRS] play start', { idx, url: SRS_FIXED_URL, devId, devNo });
 
   const player = createSrsCanvasPlayer();
-  bodyEl.innerHTML = ''; bodyEl.appendChild(player.canvas);
+  bodyEl.innerHTML = '';
+  bodyEl.appendChild(player.canvas);
   titleEl.textContent = `${devNo} 视频`;
   mediaSlots[idx].type = 'video';
   mediaSlots[idx].player = player;
@@ -817,6 +838,11 @@ async function openVideoInGrid(devId, devNo) {
     console.error('[SRS] play failed', e);
     titleEl.textContent = `${devNo} 视频(失败)`;
     eventBus.emit('toast:show', { type: 'error', message: '拉流失败，请检查 webrtc 服务/证书/网络' });
+    // 失败时回收画布
+    try { player.destroy(); } catch {}
+    bodyEl.innerHTML = `<div class="media-placeholder">在此显示视频流或模式</div>`;
+    mediaSlots[idx].type = null;
+    mediaSlots[idx].player = null;
   }
 }
 function openModeInGrid(devId, devNo, modeId) {
@@ -867,4 +893,4 @@ function formatTime(ts) {
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 function debounce(fn,ms=300){ let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args),ms); }; }
-function throttle(fn,ms=100){ let t=0, id=null, lastArgs=null; return (...args)=>{ const now=Date.now(); lastArgs=args; if (now-t>=ms){ t=now; fn(...lastArgs); } else if(!id){ id=setTimeout(()=>{ t=Date.now(); id=null; fn(...lastArgs); }, ms-(now-t)); } }; }
+function throttle(fn,ms=100){ let t=0, id=null, lastArgs=null; return (...args)=>{ const now=Date.now(); lastArgs=args; if(now-t>=ms){ t=now; fn(...lastArgs); } else if(!id){ id=setTimeout(()=>{ t=Date.now(); id=null; fn(...lastArgs); }, ms-(now-t)); } }; }
