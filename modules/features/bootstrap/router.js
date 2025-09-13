@@ -1,8 +1,8 @@
 import { authRequireGuard } from '@core/auth.js';
 import { closeAllModals } from '@ui/modal.js';
-import { mountUserListPage, unmountUserListPage } from '@features/users/UserListPage.js';
-import { mountSitePage, unmountSitePage } from '@features/site/SitePage.js';
-import { mountLoginPage, unmountLoginPage } from '@features/users/LoginPage.js';
+import { mountUserListPage, unmountUserListPage } from '@features/pages/UserListPage.js';
+import { mountSitePage, unmountSitePage } from '@features/pages/SitePage.js';
+import { mountLoginPage, unmountLoginPage } from '@features/pages/LoginPage.js';
 
 let currentUnmount = null;
 
