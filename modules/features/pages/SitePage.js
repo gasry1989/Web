@@ -69,6 +69,15 @@ export function mountSitePage() {
   tree = createTreePanel();
   leftWrap.appendChild(tree);
 
+  // 监听树筛选变化（事件名兼容几种），以及左侧容器上的 input/change 兜底
+  const onTreeFiltersChange = debounce(() => { reloadByFilters(leftWrap); }, 250);
+  ['filtersChange','filterchange','filterschange','filters:change'].forEach(evt => {
+    try { tree.addEventListener(evt, onTreeFiltersChange); } catch {}
+  });
+  // 兜底：捕获左侧容器内部的输入变更（即使 TreePanel 不派发自定义事件也能触发）
+  leftWrap.addEventListener('input', onTreeFiltersChange, true);
+  leftWrap.addEventListener('change', onTreeFiltersChange, true);
+
   // 上半部分：地图 + 侧栏
   const topRow = document.createElement('div');
   topRow.className = 'sp-top';
@@ -163,8 +172,7 @@ async function bootstrapData(summaryEl, notifyEl) {
   try {
     const [types, modes, online, summary] = await Promise.all([ apiDevTypes(), apiDevModes(), apiOnlineList(), apiDeviceSummary() ]);
 
-    const { devType, devMode, searchStr, onlyOnline } = tree.getFilterValues();
-    const filters = { devType, devMode, filterOnline: !!onlyOnline, searchStr };
+    const filters = getFiltersFromTree();
     try { siteState.set({ filters }); } catch {}
 
     console.info('[Site] filters:', JSON.stringify(filters));
@@ -187,6 +195,30 @@ async function bootstrapData(summaryEl, notifyEl) {
     renderNotify(notifyEl, (online.list || []).slice(0,50));
   } catch (e) {
     console.error('[Site] bootstrapData error', e);
+  }
+}
+
+// 新增：根据当前树筛选刷新树与地图（不再重复取 types/modes/summary）
+async function reloadByFilters(leftWrapRef) {
+  try {
+    const filters = getFiltersFromTree();
+    try { siteState.set({ filters }); } catch {}
+    console.info('[Site] filters:', JSON.stringify(filters));
+
+    const [grouped, ungrouped] = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
+    console.info('[Site] device counts:', { grouped: grouped?.devList?.length||0, ungrouped: ungrouped?.devList?.length||0 });
+
+    tree.setData({
+      groupedDevices: grouped.devList || [],
+      ungroupedDevices: ungrouped.devList || [],
+      // 保持展开层级，可按需调整
+      expandLevel: 2
+    });
+
+    const all = [...(grouped.devList||[]), ...(ungrouped.devList||[])];
+    mapView.setMarkers(all);
+  } catch (e) {
+    console.error('[Site] reloadByFilters error', e);
   }
 }
 
@@ -277,5 +309,10 @@ function closeSlot(idx) {
 }
 
 /* ---------------- 工具 ---------------- */
+function debounce(fn, wait=300) { let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; }
+function getFiltersFromTree(){
+  const { devType, devMode, searchStr, onlyOnline } = tree.getFilterValues();
+  return { devType, devMode, filterOnline: !!onlyOnline, searchStr };
+}
 function escapeHTML(str=''){return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmt(ts){ if(!ts) return ''; const d=new Date(ts); const p=n=>n<10?'0'+n:n; return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
