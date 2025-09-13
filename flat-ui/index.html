@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flat UI 演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 800px;
+            width: 90%;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 32px;
+            color: #333;
+            font-size: 28px;
+            font-weight: 600;
+        }
+
+        .section {
+            margin-bottom: 32px;
+        }
+
+        .section h2 {
+            margin-bottom: 16px;
+            color: #555;
+            font-size: 20px;
+            font-weight: 500;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 8px;
+        }
+
+        .links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .link-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            text-decoration: none;
+            color: #333;
+            transition: all 0.3s;
+            display: block;
+        }
+
+        .link-card:hover {
+            background: #e9ecef;
+            border-color: #dee2e6;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+        }
+
+        .link-card h3 {
+            margin-bottom: 8px;
+            color: #1890ff;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .link-card p {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.4;
+        }
+
+        .note {
+            background: #e6f7ff;
+            border: 1px solid #91d5ff;
+            border-radius: 6px;
+            padding: 16px;
+            margin-top: 24px;
+            font-size: 14px;
+            color: #0050b3;
+        }
+
+        .note strong {
+            color: #003a8c;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 24px;
+                margin: 20px;
+            }
+            
+            h1 {
+                font-size: 24px;
+                margin-bottom: 24px;
+            }
+            
+            .links {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Flat UI 演示系统</h1>
+        
+        <div class="section">
+            <h2>页面 (Pages)</h2>
+            <div class="links">
+                <a href="pages/login.html" class="link-card" target="_blank">
+                    <h3>登录页面</h3>
+                    <p>用户登录界面，包含账号、密码和验证码输入</p>
+                </a>
+                <a href="pages/users.html" class="link-card" target="_blank">
+                    <h3>用户管理</h3>
+                    <p>用户列表管理，支持添加、编辑、删除用户操作</p>
+                </a>
+                <a href="pages/site.html" class="link-card" target="_blank">
+                    <h3>站点管理</h3>
+                    <p>设备管理和地图展示，媒体流播放功能</p>
+                </a>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>弹窗 (Modals)</h2>
+            <div class="links">
+                <a href="modals/add-user.html" class="link-card" target="_blank">
+                    <h3>添加用户</h3>
+                    <p>新增用户弹窗，包含角色选择和密码生成</p>
+                </a>
+                <a href="modals/edit-user.html" class="link-card" target="_blank">
+                    <h3>编辑用户</h3>
+                    <p>修改用户信息弹窗，支持角色和地区设置</p>
+                </a>
+                <a href="modals/password.html" class="link-card" target="_blank">
+                    <h3>修改密码</h3>
+                    <p>密码修改弹窗，包含强度检测和生成功能</p>
+                </a>
+                <a href="modals/device-overview.html" class="link-card" target="_blank">
+                    <h3>设备概览</h3>
+                    <p>设备列表查看弹窗，支持分页和筛选</p>
+                </a>
+                <a href="modals/role-matrix.html" class="link-card" target="_blank">
+                    <h3>角色权限管理</h3>
+                    <p>角色权限矩阵管理，可配置不同角色的权限</p>
+                </a>
+            </div>
+        </div>
+
+        <div class="note">
+            <strong>说明：</strong> 此 flat-ui 系统是从原有模块系统中抽取的独立版本。每个页面包含内联 CSS 样式，JS 文件负责业务逻辑和事件绑定。所有功能均为模拟实现，实际使用时需要连接真实的 API 接口。原有的模块系统保持完全不变。
+        </div>
+    </div>
+</body>
+</html>
