@@ -1,0 +1,500 @@
+/* Components CSS Bundle - Consolidated component styles for index.html */
+/* This combines all component-specific styles for better performance */
+
+/* 仅针对 AddUserModal 重构的样式，可以合并到通用 form.css 里 */
+.add-user-modal {
+  min-width: 600px;
+}
+
+.add-user-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 14px;
+}
+
+.add-user-form .form-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.add-user-form .form-label {
+  width: 110px;
+  flex-shrink: 0;
+  line-height: 32px;
+  font-size: 13px;
+  color: #aeb5bd;
+  text-align: right;
+  position: relative;
+}
+
+.add-user-form .form-label .req {
+  color: #ff6660;
+  font-weight: 600;
+  margin-left: 4px;
+  font-size: 14px;
+}
+
+.add-user-form .form-field {
+  flex: 1;
+}
+
+.add-user-form input,
+.add-user-form select,
+.add-user-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #262d33;
+  border: 1px solid #39424d;
+  border-radius: 4px;
+  color: #fff;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 20px;
+}
+.add-user-form input:focus,
+.add-user-form select:focus,
+.add-user-form textarea:focus {
+  outline: none;
+  border-color: #1e6ad6;
+}
+
+.add-user-form textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.add-user-form .form-item-inline .form-field {
+  display: flex;
+  gap: 10px;
+}
+
+.add-user-form .form-item-inline .form-field.three-cols select {
+  flex: 1;
+}
+
+.parent-search-list {
+  margin-top: 4px;
+  max-height: 140px;
+  overflow: auto;
+  background: #1f252b;
+  border: 1px solid #2f363d;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.parent-search-list .parent-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.parent-search-list .parent-item.empty {
+  cursor: default;
+  color: #66707a;
+}
+.parent-search-list .parent-item:hover:not(.empty){
+  background: #2b343c;
+}
+
+.add-user-form .form-actions {
+  margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #2c333a;
+}
+
+.add-user-form .form-actions .btn {
+  min-width: 80px;
+}
+
+@media (max-width: 660px) {
+  .add-user-modal { min-width: 100%; }
+  .add-user-form .form-item {
+    flex-direction: column;
+  }
+  .add-user-form .form-label {
+    width: auto;
+    text-align: left;
+    line-height: 1.4;
+  }
+  .add-user-form .form-item-inline .form-field.three-cols {
+    flex-direction: column;
+  }
+  .add-user-form .hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #76818c;
+}
+}/* 表单与验证提示 */
+input:invalid, select:invalid, textarea:invalid {
+  /* 仅提交后再通过 JS 添加一个类 .form-submitted 来真正显示错误边框 */
+}
+.form-vertical.form-submitted input:invalid,
+.form-vertical.form-submitted select:invalid,
+.form-vertical.form-submitted textarea:invalid {
+  border-color:var(--color-danger);
+}
+.inline-error {
+  font-size:11px;
+  color:var(--color-danger);
+  margin-top:3px;
+}
+.flex-3 {
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+}.modal-overlay.locked {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 1000;
+}
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #1f252b;
+  color: #d8dce0;
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.45);
+  display: flex;
+  flex-direction: column;
+  max-height: 82vh;
+  overflow: hidden;
+  z-index: 1001;
+}
+.modal__header {
+  padding: 14px 18px;
+  font-weight: 600;
+  font-size: 15px;
+  border-bottom: 1px solid #2c333a;
+}
+.modal__body {
+  padding: 14px 18px 18px;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.modal__footer {
+  padding: 12px 16px 14px;
+  border-top: 1px solid #2c333a;
+  text-align: right;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.modal-open { overflow: hidden; }
+.btn {
+  cursor: pointer;
+}/* 修改密码弹窗样式增强 */
+.password-modal .form-item {
+  margin-bottom: 14px;
+}
+.password-modal .form-label {
+  display:block;
+  font-size:13px;
+  margin-bottom:4px;
+  color:#cfd6dd;
+}
+.password-modal .form-field input,
+.password-modal .form-field textarea {
+  width:100%;
+  box-sizing:border-box;
+  padding:6px 10px;
+  background:#161b21;
+  border:1px solid #2c343c;
+  border-radius:4px;
+  color:#fff;
+  font-size:13px;
+  outline:none;
+  transition:border-color .15s;
+}
+.password-modal .form-field input:focus {
+  border-color:#3d78d4;
+}
+.password-modal .form-field .readonly {
+  opacity:.8;
+}
+
+.password-modal .pwd-field {
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+.password-modal .pwd-field input {
+  padding-right:40px;
+}
+.password-modal .pwd-eye {
+  position:absolute;
+  right:6px;
+  top:50%;
+  transform:translateY(-50%);
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  color:#9aa5b1;
+  font-size:16px;
+  line-height:1;
+  padding:0 4px;
+}
+.password-modal .pwd-eye:hover { color:#fff; }
+
+.password-modal .pwd-mini-actions {
+  display:flex;
+  gap:6px;
+  margin-top:6px;
+}
+.password-modal .btn.btn-xs {
+  padding:2px 8px;
+  font-size:12px;
+  line-height:18px;
+  background:#1f2730;
+  border:1px solid #2f3944;
+  color:#cfd6dd;
+  cursor:pointer;
+  border-radius:4px;
+}
+.password-modal .btn.btn-xs:hover {
+  background:#2a3440;
+}
+
+.password-modal .pwd-strength-wrap {
+  margin-top:6px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.password-modal .pwd-strength-bg {
+  flex:1;
+  height:6px;
+  border-radius:3px;
+  background:#232b33;
+  overflow:hidden;
+}
+.password-modal .pwd-strength-bar {
+  height:100%;
+  width:0;
+  background:linear-gradient(90deg,#e74c3c,#f39c12,#2ecc71);
+  transition:width .25s;
+  filter:brightness(.85);
+}
+.password-modal .pwd-strength-bar[data-level="弱"] {
+  background:#e74c3c;
+}
+.password-modal .pwd-strength-bar[data-level="中"] {
+  background:linear-gradient(90deg,#f39c12,#f1c40f);
+}
+.password-modal .pwd-strength-bar[data-level="强"] {
+  background:#2ecc71;
+}
+.password-modal .pwd-strength-label {
+  min-width:32px;
+  font-size:12px;
+  color:#9aa5b1;
+}
+
+.password-modal .pwd-inline-msg {
+  font-size:12px;
+  margin-top:4px;
+  min-height:18px;
+}
+.password-modal .pwd-inline-msg.err { color:#e57373; }
+.password-modal .pwd-inline-msg.ok { color:#55d899; }
+
+.password-modal .pwd-rules {
+  margin:6px 0 0;
+  padding-left:16px;
+  list-style:disc;
+  font-size:12px;
+  color:#6c7883;
+  line-height:1.5;
+}
+
+.password-modal .form-actions {
+  display:flex;
+  gap:12px;
+  margin-top:4px;
+}
+
+.password-modal #btnPwdSubmit:disabled {
+  opacity:.5;
+  cursor:not-allowed;
+}
+
+.password-modal .req { color:#ed6a5e; }
+
+/* 可合并到你的公共样式 */
+.add-user-modal .pwd-field {
+  position:relative;
+  display:flex;
+  align-items:center;
+}
+.add-user-modal .pwd-field input { padding-right:40px; }
+.add-user-modal .pwd-eye {
+  position:absolute;
+  right:6px;
+  top:50%;
+  transform:translateY(-50%);
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  color:#9aa5b1;
+  font-size:16px;
+  padding:0 4px;
+}
+.add-user-modal .pwd-eye:hover { color:#fff; }
+.add-user-modal .pwd-mini-actions {
+  display:flex;
+  gap:6px;
+  margin-top:6px;
+}
+.add-user-modal .btn.btn-xs {
+  padding:2px 8px;
+  font-size:12px;
+  line-height:18px;
+  background:#1f2730;
+  border:1px solid #2f3944;
+  color:#cfd6dd;
+  border-radius:4px;
+  cursor:pointer;
+}
+.add-user-modal .btn.btn-xs:hover { background:#2a3440; }
+.add-user-modal .pwd-strength-wrap {
+  margin-top:6px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.add-user-modal .pwd-strength-bg {
+  flex:1;
+  height:6px;
+  background:#232b33;
+  border-radius:3px;
+  overflow:hidden;
+}
+.add-user-modal .pwd-strength-bar {
+  height:100%;
+  width:0;
+  background:linear-gradient(90deg,#e74c3c,#f39c12,#2ecc71);
+  transition:width .25s;
+}
+.add-user-modal .pwd-strength-bar[data-level="弱"] { background:#e74c3c; }
+.add-user-modal .pwd-strength-bar[data-level="中"] { background:linear-gradient(90deg,#f39c12,#f1c40f); }
+.add-user-modal .pwd-strength-bar[data-level="强"] { background:#2ecc71; }
+.add-user-modal .pwd-strength-label {
+  min-width:32px;
+  font-size:12px;
+  color:#9aa5b1;
+}
+.add-user-modal .pwd-inline-msg {
+  font-size:12px;
+  min-height:18px;
+  margin-top:4px;
+}
+.add-user-modal .pwd-inline-msg.err { color:#e57373; }
+.add-user-modal .pwd-inline-msg.ok { color:#55d899; }
+.add-user-modal .pwd-rules {
+  margin:6px 0 0;
+  padding-left:16px;
+  list-style:disc;
+  font-size:12px;
+  color:#6c7883;
+  line-height:1.5;
+}
+#btnSubmitAddUser:disabled { opacity:.55; cursor:not-allowed; }/* 表格组件细化样式，独立便于按需裁剪 */
+.data-table thead th {
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:#1f2a32;
+}
+.data-table tbody tr.selected {
+  background:#25323b;
+}
+.data-table td .dot { vertical-align:middle; }
+.data-table .btn-xs {
+  margin:0 2px;
+}#globalToastContainer {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  width: auto;
+  max-width: 60vw;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  pointer-events: none; /* 不挡住下层点击（内部按钮恢复 pointer-events） */
+}
+
+.toast-item {
+  background: rgba(40, 45, 52, 0.95);
+  border: 1px solid #38424d;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  box-shadow: 0 4px 14px -2px rgba(0,0,0,0.45);
+  animation: toastEnter .18s ease;
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.toast-item.leaving {
+  animation: toastLeave .18s ease forwards;
+}
+
+.toast-inner {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  gap: 12px;
+}
+
+.toast-msg {
+  line-height: 18px;
+  word-break: break-all;
+  flex: 1;
+}
+
+.toast-close {
+  background: transparent;
+  border: none;
+  color: #9aa2ab;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.toast-close:hover {
+  color: #fff;
+}
+
+.toast-success { border-color:#1d6d3a; background:rgba(27,95,50,0.95); }
+.toast-error   { border-color:#7d2b2b; background:rgba(120,40,40,0.95); }
+.toast-warn    { border-color:#806010; background:rgba(120,88,20,0.95); }
+.toast-info    { border-color:#2e4d7f; background:rgba(40,60,95,0.95); }
+
+@keyframes toastEnter {
+  from { opacity:0; transform: translateY(-8px); }
+  to   { opacity:1; transform: translateY(0); }
+}
+@keyframes toastLeave {
+  from { opacity:1; transform: translateY(0); }
+  to   { opacity:0; transform: translateY(-8px); }
+}/* 可选：若引入请在 index.html link 引入 */
+.rtc-video-el {
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  background:#000;
+  border:1px solid #2e3a44;
+  border-radius:4px;
+}
