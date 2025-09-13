@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>角色权限管理</title>
+    <style>
+        /* Role Matrix Modal Inline CSS */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f6fa;
+            color: #333;
+            padding: 20px;
+        }
+
+        .modal-container {
+            max-width: 90vw;
+            width: 800px;
+            max-height: 80vh;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid #e8e8e8;
+            background: #fafafa;
+        }
+
+        .modal-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .modal-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .role-matrix h3 {
+            margin-bottom: 16px;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .matrix-scroll {
+            flex: 1;
+            overflow: auto;
+            border: 1px solid #e8e8e8;
+            border-radius: 4px;
+        }
+
+        .matrix-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            min-width: 600px;
+        }
+
+        .matrix-table th {
+            background: #fafafa;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 1px solid #e8e8e8;
+            border-right: 1px solid #e8e8e8;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .matrix-table th:first-child {
+            min-width: 120px;
+            max-width: 150px;
+            position: sticky;
+            left: 0;
+            z-index: 11;
+            background: #fafafa;
+        }
+
+        .matrix-table td {
+            padding: 8px;
+            border-bottom: 1px solid #f0f0f0;
+            border-right: 1px solid #f0f0f0;
+            vertical-align: middle;
+            text-align: center;
+        }
+
+        .matrix-table td:first-child {
+            text-align: left;
+            font-weight: 500;
+            background: #fafafa;
+            position: sticky;
+            left: 0;
+            z-index: 5;
+            min-width: 120px;
+            max-width: 150px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .matrix-table tr:hover {
+            background: rgba(24, 144, 255, 0.05);
+        }
+
+        .matrix-table tr:hover td:first-child {
+            background: rgba(24, 144, 255, 0.1);
+        }
+
+        .matrix-table input[type="checkbox"] {
+            cursor: pointer;
+            transform: scale(1.1);
+        }
+
+        .matrix-table input[type="checkbox"]:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        /* Permission column headers */
+        .matrix-table th:not(:first-child) {
+            min-width: 80px;
+            max-width: 120px;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            padding: 16px 20px;
+            border-top: 1px solid #e8e8e8;
+            background: #fafafa;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            background: white;
+            color: #666;
+        }
+
+        .btn-primary {
+            background: #1890ff;
+            border-color: #1890ff;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #40a9ff;
+            border-color: #40a9ff;
+        }
+
+        .btn:hover:not(.btn-primary):not(:disabled) {
+            border-color: #40a9ff;
+            color: #40a9ff;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Scrollbar styling */
+        .matrix-scroll::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        .matrix-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .matrix-scroll::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+
+        .matrix-scroll::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+            
+            .modal-container {
+                max-width: 100%;
+                width: 100%;
+                height: 90vh;
+                max-height: none;
+            }
+            
+            .modal-body {
+                padding: 12px;
+            }
+            
+            .matrix-table {
+                font-size: 12px;
+            }
+            
+            .matrix-table th,
+            .matrix-table td {
+                padding: 6px 4px;
+            }
+            
+            .matrix-table th:first-child,
+            .matrix-table td:first-child {
+                min-width: 100px;
+                max-width: 120px;
+            }
+        }
+
+        /* Loading state */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #1890ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="modal-container">
+        <div class="modal-header">
+            <h2>角色权限管理</h2>
+        </div>
+        <div class="modal-body">
+            <div class="role-matrix">
+                <h3>用户角色权限矩阵</h3>
+                <div class="matrix-scroll" id="matrixContainer">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        正在加载权限数据...
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="window.close()">取消</button>
+            <button class="btn btn-primary" id="btnConfirm">确认</button>
+        </div>
+    </div>
+
+    <script>
+        // Role Matrix Modal JavaScript
+        (function() {
+            'use strict';
+
+            let rolesData = [];
+            let permissionsCols = [];
+            let currentRoleId = 1; // Mock current user role
+
+            // Mock roles and permissions data
+            const mockRolesData = [
+                {
+                    roleId: 1,
+                    roleName: '管理员',
+                    permissions: [
+                        { id: 'user.create', name: '创建用户', granted: true },
+                        { id: 'user.edit', name: '编辑用户', granted: true },
+                        { id: 'user.delete', name: '删除用户', granted: true },
+                        { id: 'device.view', name: '查看设备', granted: true },
+                        { id: 'device.control', name: '控制设备', granted: true },
+                        { id: 'system.config', name: '系统配置', granted: true }
+                    ]
+                },
+                {
+                    roleId: 2,
+                    roleName: '总账号',
+                    permissions: [
+                        { id: 'user.create', name: '创建用户', granted: true },
+                        { id: 'user.edit', name: '编辑用户', granted: true },
+                        { id: 'user.delete', name: '删除用户', granted: false },
+                        { id: 'device.view', name: '查看设备', granted: true },
+                        { id: 'device.control', name: '控制设备', granted: true },
+                        { id: 'system.config', name: '系统配置', granted: false }
+                    ]
+                },
+                {
+                    roleId: 3,
+                    roleName: '子账号',
+                    permissions: [
+                        { id: 'user.create', name: '创建用户', granted: false },
+                        { id: 'user.edit', name: '编辑用户', granted: false },
+                        { id: 'user.delete', name: '删除用户', granted: false },
+                        { id: 'device.view', name: '查看设备', granted: true },
+                        { id: 'device.control', name: '控制设备', granted: false },
+                        { id: 'system.config', name: '系统配置', granted: false }
+                    ]
+                },
+                {
+                    roleId: 4,
+                    roleName: '只读用户',
+                    permissions: [
+                        { id: 'user.create', name: '创建用户', granted: false },
+                        { id: 'user.edit', name: '编辑用户', granted: false },
+                        { id: 'user.delete', name: '删除用户', granted: false },
+                        { id: 'device.view', name: '查看设备', granted: true },
+                        { id: 'device.control', name: '控制设备', granted: false },
+                        { id: 'system.config', name: '系统配置', granted: false }
+                    ]
+                }
+            ];
+
+            // Initialize
+            init();
+
+            function init() {
+                parseURLParams();
+                bindEvents();
+                loadData();
+            }
+
+            function parseURLParams() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const currentRole = urlParams.get('currentRoleId');
+                if (currentRole) {
+                    currentRoleId = Number(currentRole);
+                }
+            }
+
+            function bindEvents() {
+                document.getElementById('btnConfirm').addEventListener('click', onConfirm);
+            }
+
+            function loadData() {
+                // Simulate API call
+                setTimeout(() => {
+                    try {
+                        rolesData = [...mockRolesData];
+                        
+                        // Collect all permission columns
+                        const permIdSet = new Map();
+                        rolesData.forEach(r => 
+                            (r.permissions || []).forEach(p => permIdSet.set(p.id, p.name))
+                        );
+                        permissionsCols = Array.from(permIdSet.entries());
+                        
+                        renderMatrix();
+                    } catch (e) {
+                        showError('加载权限数据失败');
+                    }
+                }, 500);
+            }
+
+            function renderMatrix() {
+                const container = document.getElementById('matrixContainer');
+                
+                if (!rolesData.length || !permissionsCols.length) {
+                    container.innerHTML = '<div class="loading">暂无权限数据</div>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <table class="matrix-table" id="matrixTable">
+                        <thead>
+                            <tr>
+                                <th>角色</th>
+                                ${permissionsCols.map(([pid, name]) => 
+                                    `<th title="${escapeHTML(name)}">${escapeHTML(name)}</th>`
+                                ).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rolesData.map(role => renderRoleRow(role)).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+
+            function renderRoleRow(role) {
+                const editable = role.roleId > currentRoleId && currentRoleId <= 1;
+                
+                return `
+                    <tr data-role="${role.roleId}">
+                        <td title="${escapeHTML(role.roleName || '')}">${escapeHTML(role.roleName || '')}</td>
+                        ${permissionsCols.map(([pid]) => {
+                            const p = (role.permissions || []).find(x => x.id === pid);
+                            const checked = p?.granted ? 'checked' : '';
+                            const disabled = editable ? '' : 'disabled';
+                            return `<td><input type="checkbox" data-perm="${pid}" ${checked} ${disabled} /></td>`;
+                        }).join('')}
+                    </tr>
+                `;
+            }
+
+            function showError(message) {
+                const container = document.getElementById('matrixContainer');
+                container.innerHTML = `<div class="loading" style="color: #ff4d4f;">${escapeHTML(message)}</div>`;
+            }
+
+            function onConfirm() {
+                const editedRoles = collectEdited();
+                
+                console.log('Submitting role permissions:', editedRoles);
+                alert('模拟权限更新成功！数据已输出到控制台。');
+                
+                // In real implementation, call API here
+                // window.close();
+            }
+
+            function collectEdited() {
+                const table = document.getElementById('matrixTable');
+                if (!table) return [];
+                
+                return rolesData.map(r => {
+                    const editable = r.roleId > currentRoleId && currentRoleId <= 1;
+                    const tr = table.querySelector(`tr[data-role="${r.roleId}"]`);
+                    
+                    const perms = permissionsCols.map(([pid]) => {
+                        let granted = false;
+                        const existing = (r.permissions || []).find(p => p.id === pid);
+                        
+                        if (editable && tr) {
+                            const chk = tr.querySelector(`input[data-perm="${pid}"]`);
+                            granted = !!chk?.checked;
+                        } else {
+                            granted = existing?.granted || false;
+                        }
+                        
+                        return { id: pid, granted };
+                    });
+                    
+                    return {
+                        roleId: r.roleId,
+                        roleName: r.roleName,
+                        permissions: perms
+                    };
+                });
+            }
+
+            function escapeHTML(str = '') {
+                return str.replace(/[&<>"']/g, c => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[c]));
+            }
+        })();
+    </script>
+</body>
+</html>

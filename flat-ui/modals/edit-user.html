@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>修改用户信息</title>
+    <style>
+        /* Edit User Modal Inline CSS */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f6fa;
+            color: #333;
+            padding: 20px;
+        }
+
+        .modal-container {
+            max-width: 860px;
+            max-height: 560px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #e8e8e8;
+            background: #fafafa;
+        }
+
+        .modal-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .modal-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-form {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+            padding: 10px 14px 12px;
+            gap: 10px;
+        }
+
+        .content-scroll {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 0;
+            overflow-y: auto;
+        }
+
+        .form-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-height: 40px;
+        }
+
+        .form-row-remark {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-label {
+            flex: 0 0 110px;
+            text-align: left;
+            font-size: 13px;
+            color: #555;
+            line-height: 1.2;
+        }
+
+        .form-field {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .form-field input,
+        .form-field select,
+        .form-field textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-size: 13px;
+            transition: border-color 0.3s;
+        }
+
+        .form-field input:focus,
+        .form-field select:focus,
+        .form-field textarea:focus {
+            outline: none;
+            border-color: #40a9ff;
+            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+        }
+
+        .form-field input:disabled {
+            background: #f5f5f5;
+            color: #999;
+            cursor: not-allowed;
+        }
+
+        .form-field textarea {
+            resize: vertical;
+            min-height: 110px;
+            max-height: 240px;
+            line-height: 1.4;
+        }
+
+        .region-group {
+            display: flex;
+            gap: 12px;
+            width: 100%;
+        }
+
+        .region-group select {
+            flex: 1;
+        }
+
+        /* Parent search */
+        .parent-search-list {
+            margin-top: 6px;
+            max-height: 180px;
+            overflow-y: auto;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            background: #fff;
+            font-size: 13px;
+        }
+
+        .parent-item {
+            padding: 6px 10px;
+            cursor: pointer;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .parent-item:last-child {
+            border-bottom: none;
+        }
+
+        .parent-item:hover {
+            background: #f0f8ff;
+            color: #1890ff;
+        }
+
+        .parent-item.empty {
+            cursor: default;
+            color: #999;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .bottom-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            padding-top: 8px;
+            border-top: 1px solid #f0f0f0;
+            flex-shrink: 0;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            background: white;
+            color: #666;
+        }
+
+        .btn-primary {
+            background: #1890ff;
+            border-color: #1890ff;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #40a9ff;
+            border-color: #40a9ff;
+        }
+
+        .btn:hover:not(.btn-primary):not(:disabled) {
+            border-color: #40a9ff;
+            color: #40a9ff;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .req {
+            color: #ff4d4f;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+            
+            .modal-container {
+                max-width: 100%;
+                height: 90vh;
+                max-height: none;
+            }
+            
+            .form-row {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 6px;
+            }
+            
+            .form-label {
+                flex: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="modal-container">
+        <div class="modal-header">
+            <h2>修改用户信息</h2>
+        </div>
+        <div class="modal-body">
+            <form id="editUserForm" class="user-form" autocomplete="off">
+                <div class="content-scroll">
+                    <input type="hidden" name="userId" value="1">
+                    <input type="hidden" name="parentUserId" value="0"/>
+
+                    <div class="form-row">
+                        <div class="form-label">用户角色 <span class="req">*</span></div>
+                        <div class="form-field">
+                            <select name="roleId" id="roleSelect" required>
+                                <option value="1">管理员</option>
+                                <option value="2" selected>总账号</option>
+                                <option value="3">子账号</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-label">登录账号</div>
+                        <div class="form-field">
+                            <input name="account" value="testuser" disabled />
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-label">用户名 <span class="req">*</span></div>
+                        <div class="form-field">
+                            <input name="name" id="nameInput" required minlength="2" maxlength="32" value="Test User"/>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-label">地区</div>
+                        <div class="form-field region-group">
+                            <select name="provinceId" id="provinceSel">
+                                <option value="1" selected>广东省</option>
+                                <option value="2">浙江省</option>
+                            </select>
+                            <select name="cityId" id="citySel">
+                                <option value="1" selected>深圳市</option>
+                                <option value="2">广州市</option>
+                            </select>
+                            <select name="zoneId" id="zoneSel">
+                                <option value="1" selected>南山区</option>
+                                <option value="2">福田区</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row" id="parentUserRow" style="display:none;">
+                        <div class="form-label">所属账号 <span class="req">*</span></div>
+                        <div class="form-field">
+                            <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
+                                <input id="parentUserInput" placeholder="搜索总帐号 (roleId=2)"/>
+                                <div id="parentSearchResult" class="parent-search-list"></div>
+                                <div class="hint">仅可选择总帐号；显示: userId 账号 用户名</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row-remark">
+                        <div class="form-label">备注</div>
+                        <div class="form-field">
+                            <textarea name="memo" maxlength="200" placeholder="不超过200字">测试用户备注信息</textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bottom-actions">
+                    <button type="submit" class="btn btn-primary">确认</button>
+                    <button type="button" class="btn" onclick="window.close()">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Edit User Modal JavaScript
+        (function() {
+            'use strict';
+
+            const form = document.getElementById('editUserForm');
+            const roleSelect = document.getElementById('roleSelect');
+            const parentRow = document.getElementById('parentUserRow');
+            const parentInput = document.getElementById('parentUserInput');
+            const parentResult = document.getElementById('parentSearchResult');
+
+            // Initialize
+            init();
+
+            function init() {
+                bindRoleChange();
+                bindParentSearch();
+                form.addEventListener('submit', onSubmit);
+                updateParentRow(); // Initial update
+            }
+
+            function bindRoleChange() {
+                roleSelect.addEventListener('change', updateParentRow);
+            }
+
+            function updateParentRow() {
+                const roleId = Number(roleSelect.value);
+                if (roleId === 3) { // Child role
+                    parentRow.style.display = '';
+                } else {
+                    parentRow.style.display = 'none';
+                    form.querySelector('input[name=parentUserId]').value = '0';
+                    parentInput.value = '';
+                    parentResult.innerHTML = '';
+                }
+            }
+
+            function bindParentSearch() {
+                let searchTimer = null;
+                
+                parentInput.addEventListener('input', () => {
+                    const val = parentInput.value.trim();
+                    if (searchTimer) clearTimeout(searchTimer);
+                    
+                    if (!val) {
+                        parentResult.innerHTML = '';
+                        return;
+                    }
+
+                    searchTimer = setTimeout(() => {
+                        // Mock search results
+                        const mockResults = [
+                            { userId: 1, userAccount: 'admin', userName: 'Administrator' },
+                            { userId: 2, userAccount: 'manager', userName: 'Manager User' }
+                        ].filter(u => 
+                            u.userAccount.toLowerCase().includes(val.toLowerCase()) ||
+                            u.userName.toLowerCase().includes(val.toLowerCase())
+                        );
+
+                        if (!mockResults.length) {
+                            parentResult.innerHTML = '<div class="parent-item empty">无匹配总帐号</div>';
+                            return;
+                        }
+
+                        parentResult.innerHTML = mockResults.map(u => `
+                            <div class="parent-item" data-id="${u.userId}">
+                                ${u.userId} ${escapeHTML(u.userAccount)} ${escapeHTML(u.userName)}
+                            </div>
+                        `).join('');
+
+                        parentResult.querySelectorAll('.parent-item').forEach(div => {
+                            if (div.classList.contains('empty')) return;
+                            div.addEventListener('click', () => {
+                                form.querySelector('input[name=parentUserId]').value = div.getAttribute('data-id');
+                                parentInput.value = div.textContent;
+                                parentResult.innerHTML = '';
+                            });
+                        });
+                    }, 300);
+                });
+            }
+
+            function escapeHTML(str = '') {
+                return str.replace(/[&<>"']/g, c => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[c]));
+            }
+
+            function onSubmit(e) {
+                e.preventDefault();
+                const formData = new FormData(form);
+                const data = Object.fromEntries(formData);
+                
+                console.log('Updating user data:', data);
+                alert('模拟更新用户成功！数据已输出到控制台。');
+                
+                // In real implementation, call API here
+                // window.close();
+            }
+        })();
+
+        // URL parameters handling for user data
+        (function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const userData = urlParams.get('userData');
+            
+            if (userData) {
+                try {
+                    const user = JSON.parse(decodeURIComponent(userData));
+                    // Populate form with user data
+                    if (user.userId) document.querySelector('input[name=userId]').value = user.userId;
+                    if (user.userName) document.querySelector('input[name=name]').value = user.userName;
+                    if (user.userAccount) document.querySelector('input[name=account]').value = user.userAccount;
+                    if (user.roleId) document.querySelector('select[name=roleId]').value = user.roleId;
+                    if (user.memo) document.querySelector('textarea[name=memo]').value = user.memo;
+                    // Add more field mappings as needed
+                    console.log('Loaded user data:', user);
+                } catch (e) {
+                    console.error('Failed to parse user data from URL:', e);
+                }
+            }
+        })();
+    </script>
+</body>
+</html>
