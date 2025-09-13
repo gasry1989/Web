@@ -1,10 +1,6 @@
 /**
- * 用户管理页面
- * 变更：
- *  - 移除标题栏内折叠按钮（只保留侧栏自身按钮）
- *  - 其它逻辑保持
+ * 用户管理页面（UI 拆分：模板 + 业务）
  */
-
 import { userState } from '@state/userState.js';
 import { authState } from '@state/authState.js';
 import { apiUserList, apiUserDelete, apiRoleList } from '@api/userApi.js';
@@ -12,6 +8,7 @@ import { buildPageWindow } from '@core/pagination.js';
 import { eventBus } from '@core/eventBus.js';
 import { hasModifyRolePermission } from '@utils/permissions.js';
 import { initSidebarToggle } from '@layout/SidebarToggle.js';
+import { importTemplate } from '@ui/templateLoader.js';
 
 let rootEl = null;
 let unsubscribe = null;
@@ -23,51 +20,23 @@ export function mountUserListPage() {
     console.error('[UserListPage] #mainView missing');
     return () => {};
   }
+  main.innerHTML = '<div id="usersPageMount"></div>';
+  const mountPoint = main.querySelector('#usersPageMount');
 
-  main.innerHTML = `
-    <div class="page users-page users-page-wrapper">
-      <div class="page-title-bar">
-        <h2>用户管理</h2>
-        <div class="actions" id="userActions"></div>
-      </div>
-      <div class="table-wrapper user-table-wrapper">
-        <table class="data-table" id="userTable">
-          <thead>
-            <tr>
-              <th><input type="checkbox" id="chkAll"/></th>
-              <th>ID</th>
-              <th>账号</th>
-              <th>用户角色</th>
-              <th>用户名</th>
-              <th>在线</th>
-              <th>上级账号</th>
-              <th>上级名称</th>
-              <th>创建者帐号</th>
-              <th>创建者名称</th>
-              <th>所属地区</th>
-              <th>创建时间</th>
-              <th>备注</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="userTableBody"></tbody>
-        </table>
-      </div>
-      <div class="pagination pagination-fixed" id="userPagination"></div>
-    </div>
-  `;
-  rootEl = main.querySelector('.users-page');
+  importTemplate('/modules/features/pages/templates/users-page.html', 'tpl-users-page')
+    .then(frag => {
+      mountPoint.innerHTML = '';
+      mountPoint.appendChild(frag);
+      rootEl = mountPoint.querySelector('.users-page-root');
 
-  // 初始化单一侧栏折叠按钮
-  initSidebarToggle();
+      initSidebarToggle();
+      bindGlobalActions();
+      subscribeState();
+      loadUserPage(1);
+    })
+    .catch(err => console.error('[UserListPage] template load failed', err));
 
-  bindGlobalActions();
-  subscribeState();
-  loadUserPage(1);
-
-  return () => {
-    unsubscribe && unsubscribe();
-  };
+  return () => { unsubscribe && unsubscribe(); };
 }
 
 export function unmountUserListPage() {
@@ -96,14 +65,8 @@ function loadUserPage(pageIndex) {
 }
 
 /* ---------------- 状态订阅与渲染 ---------------- */
-function subscribeState() {
-  unsubscribe = userState.subscribe(renderAll);
-}
-function renderAll(s) {
-  if (!rootEl) return;
-  renderTable(s);
-  renderPagination(s);
-}
+function subscribeState() { unsubscribe = userState.subscribe(renderAll); }
+function renderAll(s) { if (!rootEl) return; renderTable(s); renderPagination(s); }
 
 function renderTable(state) {
   const tbody = rootEl.querySelector('#userTableBody');
@@ -248,11 +211,7 @@ function openRoleMatrixPanel() {
 }
 
 /* ---------------- 工具 ---------------- */
-function escapeHTML(str='') {
-  return str.replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
-}
+function escapeHTML(str='') { return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function safe(v){ return v==null?'' : v; }
 function formatTime(ts) {
   if (!ts) return '';

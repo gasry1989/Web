@@ -1,30 +1,16 @@
 /**
- * 模式预览（填满 + 栅格 + 自适应字号）
- * 修复要点：:host 100% 铺满；内容不再“细长一条”
+ * 模式预览 - 模板化
  */
 export function createModePreview({ modeId, devId } = {}) {
   const host = document.createElement('div');
   const root = host.attachShadow({ mode: 'open' });
 
-  const style = document.createElement('style');
-  style.textContent = `
-  :host { all: initial; contain: content; display:block; width:100%; height:100%; }
-  *,*::before,*::after{ box-sizing:border-box; }
-  .wrap { width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#0b1119; color:#cfe; }
-  .panel { width:100%; padding:10px 12px; display:grid; grid-template-columns:auto 1fr; grid-column-gap:12px; grid-row-gap:8px; font-size:clamp(12px,1.5vw,18px); line-height:1.6; }
-  .label { white-space:nowrap; color:#a9cbe0; }
-  .value { font-weight:600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-  `;
-  const wrap = document.createElement('div'); wrap.className='wrap';
-  wrap.innerHTML = `
-    <div class="panel">
-      <div class="label">倾角X</div><div class="value" id="mx">0.00</div>
-      <div class="label">倾角Y</div><div class="value" id="my">0.00</div>
-      <div class="label">倾角Z</div><div class="value" id="mz">0.00</div>
-      <div class="label">位移</div><div class="value" id="mm">0.000</div>
-      <div class="label">电量</div><div class="value" id="mb">100%</div>
-    </div>`;
-  root.append(style, wrap);
+  (async () => {
+    const frag = await (await fetch('/modules/features/pages/components/templates/mode-preview.html', { cache: 'no-cache' })
+      .then(r=>r.text()).then(t=> new DOMParser().parseFromString(t, 'text/html')))
+      .querySelector('#tpl-mode-preview').content.cloneNode(true);
+    root.appendChild(frag);
+  })();
 
   let timer=null;
   const api={

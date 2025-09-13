@@ -1,12 +1,10 @@
 /**
- * 设备概览（分页始终显示）
- *  - 固定高度样式依赖 device-overview-fixed.css
- *  - 分页即便只有 1 页也显示 prev 1 next
+ * 设备概览 - 模板化
  */
-
 import { createModal, getModal } from '@ui/modal.js';
 import { apiDeviceList } from '@api/deviceApi.js';
 import { buildPageWindow } from '@core/pagination.js';
+import { importTemplate } from '@ui/templateLoader.js';
 
 const MAX_WIDTH = 1600;
 
@@ -29,7 +27,7 @@ const COL_MAP = [
   { key:'userName',    title:'所属帐号',   format:v=>escapeHTML(v||'') }
 ];
 
-export function showDeviceOverviewModal(opt={}) {
+export async function showDeviceOverviewModal(opt={}) {
   const exist = getModal('deviceOverviewModal');
   if (exist) {
     if (opt.userIds) state.filters.userIds = Array.isArray(opt.userIds)?opt.userIds:[];
@@ -38,34 +36,20 @@ export function showDeviceOverviewModal(opt={}) {
     return;
   }
   state.filters.userIds = Array.isArray(opt.userIds)?opt.userIds:[];
-  createAndOpen();
-  loadPage(1, { silentLoading:true });
-}
 
-function createAndOpen() {
+  let frag;
+  try {
+    frag = await importTemplate('/modules/features/pages/modals/templates/device-overview-modal.html', 'tpl-device-overview-modal');
+  } catch (e) {
+    console.error('[DeviceOverviewModal] template load failed', e);
+    return;
+  }
   const content = document.createElement('div');
-  content.className = 'device-overview dv-fixed';
-  content.innerHTML = `
-    <div class="dev-toolbar">
-      <div class="dev-actions">
-        <button class="btn btn-sm" id="btnDevRefresh" title="刷新列表">刷新</button>
-      </div>
-    </div>
-    <div class="dev-table-area">
-      <table class="data-table dev-table">
-        <thead>
-          <tr>${COL_MAP.map(c=>`<th>${c.title}</th>`).join('')}</tr>
-        </thead>
-        <tbody class="dev-tbody">${renderLoadingRow()}</tbody>
-      </table>
-      <div class="dev-overlay-loading" style="display:none;" id="devLoadingMask">
-        <div class="spinner"></div>
-      </div>
-    </div>
-    <div class="dev-footer-bar">
-      <div class="dev-pager" id="devPager"></div>
-    </div>
-  `;
+  content.appendChild(frag);
+
+  // 填充 THEAD
+  const headRow = content.querySelector('#devHeadRow');
+  headRow.innerHTML = COL_MAP.map(c=>`<th>${c.title}</th>`).join('');
 
   const width = Math.min(Math.floor(window.innerWidth * 0.8), MAX_WIDTH);
   modalRef = createModal({
@@ -77,14 +61,15 @@ function createAndOpen() {
       text:'关闭',
       onClick: close => {
         close && close();
-        // 可选：移除监听
         window.removeEventListener('resize', onResize);
         modalRef = null;
       }
     }]
   });
   if (!modalRef) return;
+
   bindEvents();
+  loadPage(1, { silentLoading:true });
 }
 
 function bindEvents() {
@@ -92,10 +77,9 @@ function bindEvents() {
     .addEventListener('click', () => loadPage(state.listInfo.pageIndex, { silentLoading:false }));
   window.addEventListener('resize', onResize);
 }
-
 function onResize() {
   const m = getModal('deviceOverviewModal');
-  if (!m || !m.wrap) return;     // 修复点：原来使用 m.el，现在使用 m.wrap
+  if (!m || !m.wrap) return;
   const width = Math.min(Math.floor(window.innerWidth * 0.8), MAX_WIDTH);
   m.wrap.style.width = width + 'px';
 }
@@ -177,9 +161,7 @@ function renderPager() {
   });
 }
 
-function renderLoadingRow() {
-  return `<tr><td colspan="${COL_MAP.length}" class="center">加载中...</td></tr>`;
-}
+function renderLoadingRow() { return `<tr><td colspan="${COL_MAP.length}" class="center">加载中...</td></tr>`; }
 
 /* ---- 标准化 ---- */
 function normalizeItem(raw) {

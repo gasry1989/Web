@@ -1,40 +1,39 @@
 /**
  * 视频预览（SRS WebRTC + canvas 填满 + DPI 自适配）
- * 修复要点：
- * - :host 全尺寸铺满父容器，避免出现“画面有帧但你看不到”的假黑屏
- * - canvas willReadFrequently，性能与浏览器警告一并处理
- * - muted 自动播放 + 关键日志
+ * 样式与结构改为模板注入，CSS 在模板内，组件用 Shadow DOM 隔离。
  */
+import { importTemplate } from '@ui/templateLoader.js';
+
 export function createVideoPreview({ objectFit = 'fill' } = {}) {
   const host = document.createElement('div');
   const root = host.attachShadow({ mode: 'open' });
 
-  const style = document.createElement('style');
-  style.textContent = `
-  :host { all: initial; contain: content; display:block; width:100%; height:100%; }
-  *,*::before,*::after{ box-sizing:border-box; }
-  .wrap { width:100%; height:100%; display:flex; background:#000; }
-  canvas { width:100%; height:100%; display:block; }
-  `;
-  const wrap = document.createElement('div'); wrap.className = 'wrap';
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  wrap.appendChild(canvas);
-  root.append(style, wrap);
-
-  let sdk=null, video=null, loop=false, rotation=0, mode=objectFit==='fit'?'fit':'fill', firstFrameLogged=false;
+  let canvas = null;
+  let ctx = null;
+  let sdk = null, video = null, loop = false, rotation = 0, mode = objectFit==='fit'?'fit':'fill', firstFrameLogged=false;
   function log(...a){ try{ console.info('[VideoPreview]', ...a);}catch{} }
 
+  // 模板准备
+  const tplReady = importTemplate('/modules/features/pages/components/templates/video-preview.html', 'tpl-video-preview')
+    .then(frag => {
+      root.appendChild(frag);
+      canvas = root.getElementById('vpCanvas');
+      ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ro.observe(canvas);
+    })
+    .catch(err => console.error('[VideoPreview] template load failed', err));
+
   const ro = new ResizeObserver(()=>{
+    if (!canvas) return;
     const r = canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio||1, 2);
     const w = Math.max(1, Math.floor(r.width*dpr));
     const h = Math.max(1, Math.floor(r.height*dpr));
     if (canvas.width!==w || canvas.height!==h){ canvas.width=w; canvas.height=h; }
-  }); ro.observe(canvas);
+  });
 
   function render(){
-    if(!loop) return;
+    if(!loop || !canvas || !ctx) return;
     const rect=canvas.getBoundingClientRect(), w=rect.width||1, h=rect.height||1;
     const vw=video?.videoWidth||0, vh=video?.videoHeight||0;
     ctx.save(); ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -59,6 +58,7 @@ export function createVideoPreview({ objectFit = 'fill' } = {}) {
   }
 
   async function play(url){
+    await tplReady; // 确保模板与 canvas 就绪
     log('play begin', url);
     await ensureDeps();
     if (sdk){ try{ sdk.close(); }catch{} sdk=null; }

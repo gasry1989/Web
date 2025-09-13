@@ -1,26 +1,23 @@
 /**
- * MapView（iframe 隔离版，单文件，无反引号/模板插值）
- * - 不新增文件；iframe 子页通过 srcdoc 注入
- * - 外部 API 不变：mount/setMarkers/openDevice/setCenter/resize/destroy
- * - 外部事件不变：markerClick/openVideo/openMode/refreshDevice
+ * MapView（iframe 隔离版）- 模板化
  */
 export function createMapView({ amapKey, debug = true } = {}) {
   const host = document.createElement('div');
-  Object.assign(host.style, { display: 'block', width: '100%', height: '100%' });
   const shadow = host.attachShadow({ mode: 'open' });
 
-  const style = document.createElement('style');
-  style.textContent = `
-  :host { all: initial; contain: content; display:block; width:100%; height:100%; }
-  *,*::before,*::after{ box-sizing:border-box; }
-  .wrap { width:100%; height:100%; position:relative; background:#0a0f14; }
-  iframe { position:absolute; inset:0; width:100%; height:100%; border:0; display:block; background:#0a0f14; }
-  .hint { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#9fb1bb; font-size:13px; pointer-events:none; }
-  `;
-  const wrap = document.createElement('div'); wrap.className = 'wrap';
-  const iframe = document.createElement('iframe');
-  const hint = document.createElement('div'); hint.className = 'hint'; hint.style.display = 'none';
-  wrap.append(iframe, hint); shadow.append(style, wrap);
+  let iframe, hint;
+
+  (async () => {
+    const frag = await (await fetch('/modules/features/pages/components/templates/map-view.html', { cache: 'no-cache' })
+      .then(r=>r.text()).then(t=> new DOMParser().parseFromString(t, 'text/html')))
+      .querySelector('#tpl-map-view').content.cloneNode(true);
+    shadow.appendChild(frag);
+    iframe = shadow.getElementById('mvIframe');
+    hint = shadow.getElementById('mvHint');
+  })();
+
+  function showHint(t){ if(hint){ hint.textContent=t; hint.style.display='flex'; } }
+  function hideHint(){ if(hint) hint.style.display='none'; }
 
   // 状态/缓存
   let ready = false;
@@ -29,11 +26,8 @@ export function createMapView({ amapKey, debug = true } = {}) {
   const markersCache = [];
   let lastOpenDevice = null;
 
-  // 日志
   const log  = (...a)=>{ if (debug) try{ console.info('[MapView]', ...a); }catch{} };
   const warn = (...a)=>{ if (debug) try{ console.warn('[MapView]', ...a); }catch{} };
-  const showHint = (t)=>{ hint.textContent=t; hint.style.display='flex'; };
-  const hideHint = ()=>{ hint.style.display='none'; };
 
   function resolveKey() {
     if (amapKey && String(amapKey).trim()) return String(amapKey).trim();
@@ -44,17 +38,15 @@ export function createMapView({ amapKey, debug = true } = {}) {
   }
   function escAttr(s=''){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  // 发送给子页（未 ready 先入队）
   function send(msg) {
     if (destroyed) return;
-    if (ready && iframe.contentWindow) {
+    if (ready && iframe?.contentWindow) {
       iframe.contentWindow.postMessage(Object.assign({ __mv: true }, msg), '*');
     } else {
       queue.push(msg);
     }
   }
 
-  // 生成 iframe srcdoc：避免任何反引号/模板插值，全部字符串拼接
   function buildSrcdoc(key, dbg) {
     const k = escAttr(key || '');
     const dbgFlag = dbg ? 'true' : 'false';
@@ -135,7 +127,6 @@ export function createMapView({ amapKey, debug = true } = {}) {
     iframe.srcdoc = buildSrcdoc(key, !!debug);
     log('mount begin, size=', host.getBoundingClientRect());
 
-    // 子窗消息桥
     const onMsg = (e) => {
       const data = e.data || {};
       if (!data || !data.__mv) return;
@@ -144,11 +135,9 @@ export function createMapView({ amapKey, debug = true } = {}) {
       switch (data.t) {
         case 'ready': {
           ready = true;
-          // flush 队列
           for (const m of queue.splice(0)) {
             try { iframe.contentWindow.postMessage(Object.assign({ __mv:true }, m), '*'); } catch {}
           }
-          // 回放缓存
           if (markersCache.length) iframe.contentWindow.postMessage({ __mv:true, t:'setMarkers', list: markersCache }, '*');
           if (lastOpenDevice) iframe.contentWindow.postMessage({ __mv:true, t:'openDevice', devInfo: lastOpenDevice.devInfo, followCenterWhenNoLocation: lastOpenDevice.followCenterWhenNoLocation }, '*');
           break;
@@ -173,7 +162,6 @@ export function createMapView({ amapKey, debug = true } = {}) {
     window.addEventListener('message', onMsg);
     host.__onMsg = onMsg;
 
-    // onload 后发送 init（带一次重试）
     let initSent = false;
     const sendInit = () => {
       if (destroyed || initSent || !iframe.contentWindow) return;
@@ -192,30 +180,5 @@ export function createMapView({ amapKey, debug = true } = {}) {
     iframe.addEventListener('load', sendInit, { once: true });
   }
 
-  // 对外 API（保持不变）
-  function setMarkers(list = []) {
-    markersCache.length = 0; markersCache.push(...list);
-    send({ t:'setMarkers', list });
-  }
-  function openDevice({ devInfo, followCenterWhenNoLocation = true }) {
-    lastOpenDevice = { devInfo, followCenterWhenNoLocation };
-    send({ t:'openDevice', devInfo, followCenterWhenNoLocation });
-  }
-  function setCenter(lng, lat) { send({ t:'setCenter', lng, lat }); }
-  function resize() { send({ t:'resize' }); }
-  function destroy() {
-    destroyed = true;
-    try { window.removeEventListener('message', host.__onMsg); } catch {}
-    try { host.remove(); } catch {}
-  }
-
-  host.el = host;
-  host.mount = mount;
-  host.setMarkers = setMarkers;
-  host.openDevice = openDevice;
-  host.setCenter = setCenter;
-  host.resize = resize;
-  host.destroy = destroy;
-
-  return host;
-}
+  function setMarkers(list = []) { markersCache.length = 0; markersCache.push(...list); send({ t:'setMarkers', list }); }
+  function openDevice({ devInfo, followCenterWhenNoLocation = true })

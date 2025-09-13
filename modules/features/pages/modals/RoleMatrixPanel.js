@@ -2,36 +2,37 @@ import { createModal, getModal } from '../../../ui/modal.js';
 import { authState } from '../../../state/authState.js';
 import { apiRoleUpdate } from '../../../api/userApi.js';
 import { eventBus } from '../../../core/eventBus.js';
+import { importTemplate } from '@ui/templateLoader.js';
 
 let modalRef = null;
 
-export function showRoleMatrixPanel(roles) {
+export async function showRoleMatrixPanel(roles) {
   if (getModal('roleMatrixModal')) return;
 
   const currentRoleId = authState.get().userInfo?.roleId;
+
   // 收集所有权限列
   const permIdSet = new Map(); // permId -> name
   roles.forEach(r => (r.permissions || []).forEach(p => permIdSet.set(p.id, p.name)));
   const permCols = Array.from(permIdSet.entries()); // [ [id,name], ... ]
 
+  let frag;
+  try {
+    frag = await importTemplate('/modules/features/pages/modals/templates/role-matrix-panel.html', 'tpl-role-matrix-panel');
+  } catch (e) {
+    console.error('[RoleMatrixPanel] template load failed', e);
+    return;
+  }
   const container = document.createElement('div');
-  container.className = 'role-matrix';
-  container.innerHTML = `
-    <h3>用户角色权限矩阵</h3>
-    <div class="matrix-scroll">
-      <table class="matrix-table">
-        <thead>
-          <tr>
-            <th>角色</th>
-            ${permCols.map(([pid,name]) => `<th title="${escapeHTML(name)}">${escapeHTML(name)}</th>`).join('')}
-          </tr>
-        </thead>
-        <tbody>
-          ${roles.map(r => renderRoleRow(r, permCols, currentRoleId)).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
+  container.appendChild(frag);
+
+  // 填充表头
+  const headRow = container.querySelector('#rmHeadRow');
+  headRow.innerHTML = `<th>角色</th>${permCols.map(([pid,name]) => `<th title="${escapeHTML(name)}">${escapeHTML(name)}</th>`).join('')}`;
+
+  // 填充表体
+  const body = container.querySelector('#rmBody');
+  body.innerHTML = roles.map(r => renderRoleRow(r, permCols, currentRoleId)).join('');
 
   modalRef = createModal({
     id: 'roleMatrixModal',
@@ -45,12 +46,12 @@ export function showRoleMatrixPanel(roles) {
         primary: true,
         onClick: async close => {
           const edited = collectEdited(roles, permCols, currentRoleId, container);
-            try {
-              await apiRoleUpdate(edited);
-              eventBus.emit('toast:show', { type:'success', message:'权限已更新' });
-              close();
-              modalRef = null;
-            } catch(e){}
+          try {
+            await apiRoleUpdate(edited);
+            eventBus.emit('toast:show', { type:'success', message:'权限已更新' });
+            close();
+            modalRef = null;
+          } catch(e){}
         }
       }
     ]
@@ -95,14 +96,6 @@ function collectEdited(roles, permCols, currentRoleId, container) {
 }
 
 export function closeRoleMatrixPanel() {
-  if (modalRef) {
-    modalRef.close();
-    modalRef = null;
-  }
+  if (modalRef) { modalRef.close(); modalRef = null; }
 }
-
-function escapeHTML(str='') {
-  return str.replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
-}
+function escapeHTML(str='') { return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

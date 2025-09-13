@@ -1,8 +1,7 @@
 /**
- * SitePage（装配）
- * - 使用 sp- 前缀类名，避开历史 CSS
- * - 提升地图容器层级（z-index），防止被其它元素覆盖
- * - 不改你的数据和交互逻辑
+ * SitePage（装配）- 模板化
+ * UI 结构与 CSS 放在 templates/site-page.html
+ * 业务与交互逻辑保持不变
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './components/VideoPreview.js';
@@ -16,6 +15,7 @@ import {
   apiDeviceSummary, apiOnlineList, apiDeviceInfo
 } from '@api/deviceApi.js';
 import { eventBus } from '@core/eventBus.js';
+import { importTemplate } from '@ui/templateLoader.js';
 
 const SRS_FIXED_URL = 'webrtc://media.szdght.com/1/camera_audio';
 
@@ -39,122 +39,65 @@ export function mountSitePage() {
   __prevMainStyle = { padding: main.style.padding, overflow: main.style.overflow, position: main.style.position, height: main.style.height };
   main.innerHTML = ''; main.style.padding = '0'; main.style.overflow = 'hidden';
   if (!getComputedStyle(main).position || getComputedStyle(main).position === 'static') main.style.position = 'relative';
-  const fitMainHeight = () => { const top = main.getBoundingClientRect().top; const h = window.innerHeight - top; if (h > 0) main.style.height = h + 'px'; };
+
+  const fitMainHeight = () => {
+    const top = main.getBoundingClientRect().top;
+    const h = window.innerHeight - top;
+    if (h > 0) main.style.height = h + 'px';
+  };
   fitMainHeight(); window.addEventListener('resize', fitMainHeight);
 
-  rootEl = document.createElement('div');
-  rootEl.className = 'sp-root';
-  rootEl.style.cssText = 'position:absolute;inset:0;display:flex;min-width:0;min-height:0;background:#0d1216;color:#cfd8dc;';
-  main.appendChild(rootEl);
+  importTemplate('/modules/features/pages/templates/site-page.html', 'tpl-site-page')
+    .then(frag => {
+      main.appendChild(frag);
+      rootEl = main.querySelector('#spRoot');
 
-  // 左侧树容器
-  const leftWrap = document.createElement('div');
-  leftWrap.className = 'sp-left';
-  leftWrap.style.cssText = 'width:320px;min-width:240px;max-width:50vw;display:flex;flex-direction:column;min-height:0;border-right:1px solid rgba(255,255,255,.08);position:relative;z-index:10;';
+      const leftWrap = rootEl.querySelector('#spLeft');
+      const splitter = rootEl.querySelector('#spSplitter');
+      const centerWrap = rootEl.querySelector('.sp-center');
 
-  // 分隔条
-  const splitter = document.createElement('div');
-  splitter.className = 'sp-splitter';
-  splitter.title = '拖动调整左侧宽度';
-  splitter.style.cssText = 'width:6px;cursor:col-resize;position:relative;z-index:10;';
+      // 左树
+      tree = createTreePanel();
+      leftWrap.appendChild(tree);
 
-  // 右侧整体（两行：上地图/状态，下媒体网格）
-  const centerWrap = document.createElement('div');
-  centerWrap.className = 'sp-center';
-  centerWrap.style.cssText = 'flex:1 1 auto;display:grid;grid-template-rows:1fr 360px;min-width:0;min-height:0;position:relative;';
+      // 监听树筛选变化
+      const onTreeFiltersChange = debounce(() => { reloadByFilters(leftWrap); }, 250);
+      ['filtersChange','filterchange','filterschange','filters:change'].forEach(evt => {
+        try { tree.addEventListener(evt, onTreeFiltersChange); } catch {}
+      });
+      leftWrap.addEventListener('input', onTreeFiltersChange, true);
+      leftWrap.addEventListener('change', onTreeFiltersChange, true);
 
-  rootEl.append(leftWrap, splitter, centerWrap);
+      // 上半：地图与侧栏
+      const mapMount = rootEl.querySelector('#spMapMount');
+      const statusPanel = rootEl.querySelector('.sp-status');
+      const notifyPanel = rootEl.querySelector('.sp-notify');
 
-  // 左树
-  tree = createTreePanel();
-  leftWrap.appendChild(tree);
+      // 地图
+      mapView = createMapView({ amapKey: (ENV && ENV.AMAP_KEY) || (window.__AMAP_KEY || ''), debug: true });
+      mapMount.appendChild(mapView);
+      mapView.mount();
 
-  // 监听树筛选变化（事件名兼容几种），以及左侧容器上的 input/change 兜底
-  const onTreeFiltersChange = debounce(() => { reloadByFilters(leftWrap); }, 250);
-  ['filtersChange','filterchange','filterschange','filters:change'].forEach(evt => {
-    try { tree.addEventListener(evt, onTreeFiltersChange); } catch {}
-  });
-  // 兜底：捕获左侧容器内部的输入变更（即使 TreePanel 不派发自定义事件也能触发）
-  leftWrap.addEventListener('input', onTreeFiltersChange, true);
-  leftWrap.addEventListener('change', onTreeFiltersChange, true);
+      mapView.addEventListener('openVideo', (e)=> openVideoInSlot(e.detail.devId, e.detail.devNo));
+      mapView.addEventListener('openMode',  (e)=> openModeInSlot(e.detail.devId, e.detail.devNo, e.detail.modeId));
+      mapView.addEventListener('refreshDevice', async (e)=>{ try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{} });
 
-  // 上半部分：地图 + 侧栏
-  const topRow = document.createElement('div');
-  topRow.className = 'sp-top';
-  // 关键：z-index 提升；建立独立层叠环境
-  topRow.style.cssText = 'position:relative;z-index:10;display:flex;gap:10px;padding:4px 10px;min-width:0;min-height:0;overflow:hidden;isolation:isolate;';
+      // 树点击 -> 信息窗
+      tree.addEventListener('deviceclick', async (e)=>{
+        try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{}
+      });
 
-  const mapBox = document.createElement('div');
-  mapBox.className = 'sp-mapbox';
-  // 关键：地图容器层级更高，且 pointer-events: auto，避免被外部样式覆盖
-  mapBox.style.cssText = 'position:relative;z-index:20;flex:1 1 auto;border:1px solid rgba(255,255,255,.08);border-radius:4px;min-width:0;min-height:0;overflow:hidden;pointer-events:auto;';
-  const mapMount = document.createElement('div');
-  mapMount.className = 'sp-mapmount';
-  mapMount.style.cssText = 'width:100%;height:100%;';
-  mapBox.appendChild(mapMount);
+      // 媒体网格
+      const grid = rootEl.querySelector('#mediaGrid');
+      grid.addEventListener('click', (ev)=>{ const btn=ev.target.closest('[data-close]'); if(!btn) return; const idx=Number(btn.getAttribute('data-close')); closeSlot(idx); });
 
-  const sideBox = document.createElement('div');
-  sideBox.className = 'sp-side';
-  sideBox.style.cssText = 'position:relative;z-index:15;width:380px;max-width:42vw;display:grid;grid-template-rows:auto 1fr;gap:10px;min-width:0;min-height:0;';
-  const statusPanel = document.createElement('div');
-  statusPanel.className = 'sp-status';
-  statusPanel.style.cssText = 'border:1px solid rgba(255,255,255,.08);background:#0b121a;border-radius:4px;padding:8px 10px;';
-  statusPanel.innerHTML = '<h3 style="margin:0 0 6px;font-size:15px;">设备状态</h3><div id="summaryChart"></div>';
-  const notifyPanel = document.createElement('div');
-  notifyPanel.className = 'sp-notify';
-  notifyPanel.style.cssText = 'border:1px solid rgba(255,255,255,.08);background:#0b121a;border-radius:4px;padding:8px 10px;display:flex;flex-direction:column;min-height:0;';
-  notifyPanel.innerHTML = '<h3 style="margin:0 0 6px;font-size:15px;">通知列表</h3><div id="notifyList" style="flex:1 1 auto;overflow:auto;min-height:0;"></div>';
+      // 分隔条
+      initSplitter(leftWrap, splitter, ()=>{ try{ mapView.resize(); }catch{} });
 
-  sideBox.append(statusPanel, notifyPanel);
-  topRow.append(mapBox, sideBox);
-
-  // 下半部分：媒体网格
-  const bottomRow = document.createElement('div');
-  bottomRow.className = 'sp-bottom';
-  // 关键：明确比地图低的层级
-  bottomRow.style.cssText = 'position:relative;z-index:1;padding:0 10px 4px;overflow:hidden;';
-  const grid = document.createElement('div');
-  grid.id = 'mediaGrid';
-  grid.className = 'sp-grid';
-  grid.style.cssText = 'display:grid;grid-template-columns:repeat(6,1fr);gap:10px;height:100%;min-width:0;';
-  grid.innerHTML = mediaSlots.map(s => `
-    <div class="sp-cell" data-idx="${s.idx}" style="background:#111722;border:2px solid #3a4854;border-radius:6px;display:flex;flex-direction:column;overflow:hidden;">
-      <div class="sp-cell-hd" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;font-size:12px;background:#0f1b27;border-bottom:1px solid rgba(255,255,255,.08);">
-        <div id="mediaTitle${s.idx}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:calc(100% - 24px);">空闲</div>
-        <button data-close="${s.idx}" title="关闭" style="width:20px;height:20px;border:none;background:transparent;color:#ccd;cursor:pointer;">✕</button>
-      </div>
-      <div id="mediaBody${s.idx}" class="sp-cell-bd" style="position:relative;flex:1 1 auto;min-height:0;background:#000;display:flex;align-items:center;justify-content:center;">
-        <div style="color:#567;font-size:12px;">在此显示视频流或模式</div>
-      </div>
-    </div>
-  `).join('');
-  bottomRow.appendChild(grid);
-
-  centerWrap.append(topRow, bottomRow);
-
-  // 地图
-  mapView = createMapView({ amapKey: (ENV && ENV.AMAP_KEY) || (window.__AMAP_KEY || ''), debug: true });
-  mapMount.appendChild(mapView);
-  mapView.mount();
-
-  // 地图事件
-  mapView.addEventListener('openVideo', (e)=> openVideoInSlot(e.detail.devId, e.detail.devNo));
-  mapView.addEventListener('openMode',  (e)=> openModeInSlot(e.detail.devId, e.detail.devNo, e.detail.modeId));
-  mapView.addEventListener('refreshDevice', async (e)=>{ try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{} });
-
-  // 树点击 -> 信息窗
-  tree.addEventListener('deviceclick', async (e)=>{
-    try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{}
-  });
-
-  // 媒体关闭
-  grid.addEventListener('click', (ev)=>{ const btn=ev.target.closest('[data-close]'); if(!btn) return; const idx=Number(btn.getAttribute('data-close')); closeSlot(idx); });
-
-  // 分隔条
-  initSplitter(leftWrap, splitter, ()=>{ try{ mapView.resize(); }catch{} });
-
-  // 首次加载
-  bootstrapData(statusPanel.querySelector('#summaryChart'), notifyPanel.querySelector('#notifyList'));
+      // 首次加载
+      bootstrapData(statusPanel.querySelector('#summaryChart'), notifyPanel.querySelector('#notifyList'));
+    })
+    .catch(err => console.error('[SitePage] template load failed', err));
 }
 
 export function unmountSitePage() {
@@ -198,7 +141,7 @@ async function bootstrapData(summaryEl, notifyEl) {
   }
 }
 
-// 新增：根据当前树筛选刷新树与地图（不再重复取 types/modes/summary）
+// 根据当前树筛选刷新树与地图
 async function reloadByFilters(leftWrapRef) {
   try {
     const filters = getFiltersFromTree();
@@ -211,7 +154,6 @@ async function reloadByFilters(leftWrapRef) {
     tree.setData({
       groupedDevices: grouped.devList || [],
       ungroupedDevices: ungrouped.devList || [],
-      // 保持展开层级，可按需调整
       expandLevel: 2
     });
 

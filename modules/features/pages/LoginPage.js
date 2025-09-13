@@ -1,5 +1,6 @@
 import { authLogin } from '../../core/auth.js';
-import { eventBus } from '@core/eventBus.js'; // 若没有可删除此行及 toast 相关调用
+import { eventBus } from '@core/eventBus.js';
+import { importTemplate } from '@ui/templateLoader.js';
 
 let captchaText = '';
 let mounted = false;
@@ -7,77 +8,50 @@ let mounted = false;
 export function mountLoginPage() {
   mounted = true;
 
-  // 登录模式：隐藏侧栏 / 侧栏折叠按钮 / 头部登录按钮
+  // 登录模式：隐藏侧栏 / 折叠按钮 / 头部登录按钮（保持原逻辑）
   const appLayout = document.getElementById('appLayout');
   appLayout && appLayout.classList.add('login-mode');
-
   const sideBar = document.getElementById('sideBar');
   if (sideBar) sideBar.style.display = 'none';
-
-  // 可能存在的侧栏折叠按钮（以前插入的）
   const collapseBtn = document.querySelector('#sideBar .sb-collapse-btn');
   if (collapseBtn) collapseBtn.style.display = 'none';
-
-  // 头部右上角“登录”按钮（示例 id：headerLoginBtn；若你的实际不一致，可调整）
   const headerLoginBtn = document.getElementById('headerLoginBtn');
   if (headerLoginBtn) headerLoginBtn.style.display = 'none';
-  // 兜底：文本为“登录”的按钮也隐藏（如果没有 id）
   document.querySelectorAll('button, a').forEach(el => {
     if ((/登录/.test(el.textContent || '')) && !el.id) {
       el.style.display = 'none';
     }
   });
 
+  // 占位并异步载入模板（不阻塞路由同步返回）
   const main = document.getElementById('mainView');
-  // 清空并渲染登录卡片（不再有外围大边框）
-  main.innerHTML = `
-    <div class="login-page">
-      <div class="login-card">
-        <h2 class="login-title">设备管理平台登录</h2>
-        <form id="loginForm" autocomplete="off">
-          <div class="form-item">
-            <label class="form-label">账号</label>
-            <div class="form-field">
-              <input name="account" required autocomplete="username" autofocus />
-            </div>
-          </div>
-          <div class="form-item">
-            <label class="form-label">密码</label>
-            <div class="form-field pwd-field">
-              <input type="password" name="pwd" required autocomplete="current-password" />
-              <button type="button" class="pwd-eye" title="显示/隐藏">👁</button>
-            </div>
-          </div>
-          <div class="form-item">
-            <label class="form-label">验证码</label>
-            <div class="form-field captcha-field">
-              <input name="captcha" required placeholder="不区分大小写" autocomplete="off" />
-              <canvas id="captchaCanvas" width="120" height="40" title="点击刷新验证码"></canvas>
-              <button type="button" id="btnCaptchaRefresh" class="btn captcha-icon-btn" title="刷新验证码" aria-label="刷新">
-                <svg viewBox="0 0 24 24" class="icon-refresh" width="18" height="18">
-                  <path d="M12 5V2L8 6l4 4V7c2.757 0 5 2.243 5 5a5 5 0 0 1-5 5 5.002 5.002 0 0 1-4.9-4H5.917A7.002 7.002 0 0 0 12 21a7 7 0 0 0 0-14Z" fill="currentColor"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="form-item inline-msg" id="loginInlineMsg"></div>
-          <div class="form-actions">
-            <button class="btn btn-primary" id="btnLogin" type="submit">登录</button>
-          </div>
-        </form>
-      </div>
-      <div class="login-footer">© ${new Date().getFullYear()} Company</div>
-    </div>
-  `;
+  main.innerHTML = `<div id="loginPageMount"></div>`;
+  const mountPoint = main.querySelector('#loginPageMount');
 
-  const form = main.querySelector('#loginForm');
-  form.addEventListener('submit', onSubmit);
+  importTemplate('/modules/features/pages/templates/login-page.html', 'tpl-login-page')
+    .then(frag => {
+      // 修复点：先获取元素，再安全赋值（不要用可选链在赋值左侧）
+      const footer = frag.querySelector('.login-footer');
+      if (footer) footer.innerHTML = `© ${new Date().getFullYear()} Company`;
 
-  form.querySelector('.pwd-eye').addEventListener('click', togglePwdVisibility);
-  form.querySelector('#btnCaptchaRefresh').addEventListener('click', generateCaptcha);
-  form.querySelector('#captchaCanvas').addEventListener('click', generateCaptcha);
+      mountPoint.innerHTML = '';
+      mountPoint.appendChild(frag);
 
-  generateCaptcha();
+      // 绑定交互（仅业务事件）
+      const form = main.querySelector('#loginForm');
+      form.addEventListener('submit', onSubmit);
+
+      form.querySelector('.pwd-eye').addEventListener('click', togglePwdVisibility);
+      form.querySelector('#btnCaptchaRefresh').addEventListener('click', generateCaptcha);
+      form.querySelector('#captchaCanvas').addEventListener('click', generateCaptcha);
+
+      generateCaptcha();
+    })
+    .catch(err => {
+      console.error('[LoginPage] template load failed', err);
+      // 简单回退：保持空白
+    });
+
   return () => {};
 }
 
@@ -110,7 +84,6 @@ function onSubmit(e) {
   msgEl.textContent = '';
   msgEl.className = 'form-item inline-msg';
 
-  // 只校验非空 & 验证码，按你的要求不做长度校验
   if (!acc || !pwd || !cap) {
     msgEl.textContent = '请填写所有字段';
     msgEl.classList.add('err');
@@ -161,27 +134,23 @@ function generateCaptcha() {
   captchaText = randomCaptcha(5);
   drawCaptcha(captchaText);
 }
-
 function randomCaptcha(len) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
   let s = '';
   for (let i=0;i<len;i++) s += chars[Math.floor(Math.random()*chars.length)];
   return s;
 }
-
 function drawCaptcha(text) {
   const c = document.getElementById('captchaCanvas');
   if (!c) return;
   const ctx = c.getContext('2d');
   const w = c.width, h = c.height;
   ctx.clearRect(0,0,w,h);
-
   const g = ctx.createLinearGradient(0,0,w,h);
   g.addColorStop(0,'#1d252d');
   g.addColorStop(1,'#26323d');
   ctx.fillStyle = g;
   ctx.fillRect(0,0,w,h);
-
   for (let i=0;i<text.length;i++) {
     const ch = text[i];
     const fs = 20 + Math.random()*6;
@@ -208,10 +177,5 @@ function drawCaptcha(text) {
     ctx.fillRect(Math.random()*w, Math.random()*h, 2, 2);
   }
 }
-
-function randColor() {
-  return `rgb(${100+Math.random()*155|0},${100+Math.random()*155|0},${100+Math.random()*155|0})`;
-}
-function validateCaptcha(input) {
-  return input.toLowerCase() === captchaText.toLowerCase();
-}
+function randColor() { return `rgb(${100+Math.random()*155|0},${100+Math.random()*155|0},${100+Math.random()*155|0})`; }
+function validateCaptcha(input) { return input.toLowerCase() === captchaText.toLowerCase(); }

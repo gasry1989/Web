@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body>
+  <template id="tpl-tree-panel">
+    <style>
+      :host { all: initial; contain: content; }
+      *, *::before, *::after { box-sizing: border-box; }
+      .wrap { --panel-bg:#0f1720; --panel-line:rgba(255,255,255,.08);
+        --text:#cfd8dc; --text-dim:#9fb1bb; --on:#ffffff; --off:#7a8a93;
+        --dev-on-bg:linear-gradient(135deg,#5aa0ff,#3d89ff); --dev-off-bg:#5b6b78;
+        height:100%; display:flex; flex-direction:column; background:var(--panel-bg); color:var(--text); }
+      .filters { padding:8px 10px; border-bottom:1px solid var(--panel-line); }
+      .filters label { color:var(--text-dim); display:flex; align-items:center; gap:6px; }
+      .filters .row { display:grid; grid-template-columns:1fr; gap:6px; }
+      .filters input[type="text"], .filters select { width:100%; background:#0b121a; color:var(--text); border:1px solid var(--panel-line); border-radius:4px; padding:4px 6px; }
+      .filters .chk { display:flex; align-items:center; gap:6px; white-space:nowrap; justify-content:flex-start; }
+      .filters .btn { padding:4px 10px; border:1px solid var(--panel-line); background:#122133; color:#cfd8dc; border-radius:4px; cursor:pointer; }
+      .tree { flex:1 1 auto; overflow:auto; }
+      .gdt { padding:6px 8px; min-width:100%; width:max-content; }
+      .node + .node { margin-top:6px; }
+      .row { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; cursor:pointer; user-select:none; }
+      .row:hover { background:#0e1a24; }
+      .toggle { width:16px; text-align:center; color:#9fb1bb; }
+      .toggle.is-empty { visibility:hidden; }
+      .ic-user { display:none; }
+      .ic-dev { width:12px; height:12px; border-radius:2px; display:inline-block; background:var(--dev-on-bg); }
+      .title { white-space:nowrap; }
+      .row.is-online .title { color:var(--on); }
+      .row.is-offline .title { color:var(--off); }
+      .children { margin-left:18px; border-left:1px dashed rgba(255,255,255,.12); padding-left:10px; }
+      .children.is-collapsed { display:none; }
+      .node.dev.is-online .title { color:var(--on); }
+      .node.dev.is-offline .title { color:var(--off); }
+      .node.dev.is-online .ic-dev { background:var(--dev-on-bg); }
+      .node.dev.is-offline .ic-dev { background:var(--dev-off-bg); }
+      .sec { margin:8px 8px 12px; }
+      .sec__title { font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e; border-radius:4px; border:1px solid rgba(255,255,255,.08); }
+      .list { padding:6px 8px; display:flex; flex-direction:column; gap:4px; }
+      .chip { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:4px; cursor:pointer; }
+      .chip:hover { background:#15202b; border:1px solid rgba(255,255,255,.08); }
+      .chip .ic-dev { width:12px; height:12px; border-radius:2px; }
+      .chip.is-online .title { color:var(--on); }
+      .chip.is-offline .title { color:var(--off); }
+      .chip.is-online .ic-dev { background:var(--dev-on-bg); }
+      .chip.is-offline .ic-dev { background:var(--dev-off-bg); }
+    </style>
+
+    <div class="wrap">
+      <div class="filters">
+        <div class="row">
+          <label>设备类型：<select id="fltDevType"><option value="0">全部</option></select></label>
+          <label>设备模式：<select id="fltDevMode"><option value="0">全部</option></select></label>
+          <label>名称/编号：<input id="fltSearch" placeholder="模糊搜索"/></label>
+          <label class="chk"><input type="checkbox" id="fltOnline"/> 仅显示在线</label>
+          <button class="btn" id="btnRefresh">刷新</button>
+        </div>
+      </div>
+      <div class="tree" id="tree"></div>
+    </div>
+  </template>
+</body></html>
