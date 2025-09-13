@@ -1,215 +1,205 @@
 /**
- * 现场管理主页面（无整页垂直滚动 + 地图 InfoWindow 锚定 + 底部四宫格）
- * - 页面禁止出现全局垂直滚动条：html/body 以及组件容器均 overflow hidden；树/通知内部可滚动
- * - 上半区：地图（左） + 状态/通知（右）
- * - 下半区：四宫格媒体（视频/模式）
- * - 地图悬浮窗：使用 AMap.InfoWindow({isCustom:true})，锚定设备经纬度，随地图移动
- * - 视频播放：SRS WebRTC，固定地址 webrtc://media.szdght.com/1/camera_audio（参考 rtc_player7.html 的 video+canvas 渲染）
- * - 切换路由离开“现场管理”（hash 不含 /site）时销毁地图与媒体；返回后稳妥重建
+ * 现场管理主页面（Shadow DOM 隔离 + 稳定分栏拖拽 + 地图交互打通 + 树形恢复）
+ * 变更要点：
+ * - 地图容器添加捕获阶段阻断（wheel/mouse/touch/pointer），避免外层拦截，保证拖拽/缩放可用
+ * - 树形恢复：基于原树构建，新增“占位父节点”兜底，不改变旧结构与样式
+ * - 分栏拖拽用 body 级玻璃层，仅拖拽时存在；结束彻底清除，后续地图交互不受影响
+ * - 媒体区（6窗口、灰色线框、画布DPR自适应）保持你上版确认的行为
  */
 import { siteState } from '@state/siteState.js';
 import { previewState } from '@state/previewState.js';
 import {
-  apiDevTypes,
-  apiDevModes,
-  apiGroupedDevices,
-  apiUngroupedDevices,
-  apiDeviceSummary,
-  apiOnlineList,
-  apiDeviceInfo
+  apiDevTypes, apiDevModes, apiGroupedDevices, apiUngroupedDevices,
+  apiDeviceSummary, apiOnlineList, apiDeviceInfo
 } from '@api/deviceApi.js';
 import { eventBus } from '@core/eventBus.js';
 import { ENV } from '@config/env.js';
 import { ensureWS } from '@ws/wsClient.js';
 
-/* ---------- 运行时变量 ---------- */
-let unsubSite;
-let unsubPreview;
-let mapInstance = null;
-let markersLayer = [];
+let unsubSite, unsubPreview;
 let routeWatcher = null;
 
-/* InfoWindow（地图悬浮窗） */
+let mapInstance = null;
+let markersLayer = [];
 let infoWindow = null;
-let currentInfoDevId = null;
+let followCenter = false; // 无定位时 InfoWindow 跟随地图中心
 
-/* 监听 mapContainer 尺寸变化 */
-let mapResizeObs = null;
-
-/* 记住 html/body 原 overflow，离开时恢复（全局禁滚） */
 let __prevHtmlOverflow = '';
 let __prevBodyOverflow = '';
+let __prevMainStyle = null;
 
-/* 四宫格媒体 */
+let SP_HOST = null;
+let SP_ROOT = null;
+const $ = (sel) => SP_ROOT?.querySelector(sel);
+const $id = (id) => SP_ROOT?.getElementById(id);
+
+/* 6 个窗口（保持上版） */
 const SRS_FIXED_URL = 'webrtc://media.szdght.com/1/camera_audio';
-const mediaSlots = [
-  { idx: 0, type: null, player: null, node: null, title: '', timer: null },
-  { idx: 1, type: null, player: null, node: null, title: '', timer: null },
-  { idx: 2, type: null, player: null, node: null, title: '', timer: null },
-  { idx: 3, type: null, player: null, node: null, title: '', timer: null },
-];
+const mediaSlots = Array.from({ length: 6 }, (_, i) => ({ idx: i, type: null, player: null, node: null, title: '', timer: null }));
 
-/* ---------- 样式注入（无整页滚动，内部区滚动） ---------- */
-let __SITE_STYLE_INJECTED = false;
-const __SITE_STYLE_ID = 'sitepage-inline-style';
-function injectSiteStylesOnce() {
-  if (__SITE_STYLE_INJECTED || document.getElementById(__SITE_STYLE_ID)) return;
-  const css = `
-  .site-page {
-    --panel-bg: #0f1720;
-    --panel-bg-2: #0b121a;
-    --panel-line: rgba(255,255,255,0.08);
-    --text-primary: #cfd8dc;
-    --text-dim: #9fb1bb;
-    --online-text: #ffffff;
-    --offline-text: #7a8a93;
-    --grid-border: rgba(255,0,0,.45);
+function injectStyles() {
+  const s = document.createElement('style');
+  s.id = 'sp-style';
+  s.textContent = `
+  :host { all: initial; contain: content; }
+  *, *::before, *::after { box-sizing: border-box; }
+  .sp-page {
+    --panel-bg:#0f1720; --panel-bg-2:#0b121a; --panel-line:rgba(255,255,255,.08);
+    --text-primary:#cfd8dc; --text-dim:#9fb1bb; --online-text:#fff; --offline-text:#7a8a93;
+    --grid-border:#3a4854; /* 灰线框 */
+    --media-row-height: 360px;
+    --device-online-bg:linear-gradient(135deg,#5aa0ff,#3d89ff);
+    --device-offline-bg:#5b6b78;
+    --scroll-track:#141b20; --scroll-thumb:#33424d; --scroll-thumb-hover:#415464;
+    height:100%; overflow:hidden; background:#0d1216;
+    font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; color:#cfd8dc;
   }
-  /* 组件占满视口，外层不滚动 */
-  .site-page, .site-layout { height: 100vh; overflow: hidden; }
-  .site-layout { display:flex; }
+  .sp-page * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
+  .sp-page *::-webkit-scrollbar { width: 10px; height: 10px; }
+  .sp-page *::-webkit-scrollbar-track { background: var(--scroll-track); }
+  .sp-page *::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+  .sp-page *::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 
-  .site-left {
-    width: var(--site-left-width, 320px);
-    min-width: 240px; max-width: 50vw;
-    background: var(--panel-bg); color: var(--text-primary);
-    border-right: 1px solid var(--panel-line);
-    display:flex; flex-direction:column;
-  }
-  .site-splitter { width:6px; cursor:col-resize; position:relative; background:transparent; user-select:none; }
-  .site-splitter::after { content:''; position:absolute; top:0; bottom:0; left:2px; width:2px; background: var(--panel-line); transition: background .15s; }
-  .site-splitter:hover::after, .site-splitter.dragging::after { background: rgba(93,188,252,.45); }
+  .sp-layout { height:100%; display:flex; min-width:0; }
+  .sp-left { width:320px; min-width:240px; max-width:50vw; background:var(--panel-bg); border-right:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0; }
+  .sp-splitter { width:6px; cursor:col-resize; position:relative; z-index:50; }
+  .sp-splitter::after { content:''; position:absolute; top:0; bottom:0; left:2px; width:2px; background: var(--panel-line); transition: background .15s; }
+  .sp-splitter:hover::after, .sp-splitter.dragging::after { background: rgba(93,188,252,.45); }
 
-  /* 中部采用两行 grid：上自适应，下固定 260px */
-  .site-center {
-    flex:1 1 auto;
-    background:#0a0f14;
-    display:grid;
-    grid-template-rows: 1fr 260px;
-    overflow:hidden;
-  }
+  .sp-center { flex:1 1 auto; background:#0a0f14; display:grid; grid-template-rows: 1fr var(--media-row-height); overflow:visible; min-width:0; min-height:0; }
+  .sp-top { display:flex; gap:10px; padding:4px 10px; overflow:hidden; min-width:0; }
+  .sp-map-wrap { flex:1 1 auto; background:#0a0f14; border:1px solid var(--panel-line); border-radius:4px; overflow:hidden; min-width:0; position:relative; }
+  .sp-map { width:100%; height:100%; background:#0a0f14; touch-action: pan-x pan-y; }
 
-  .top-row { display:flex; gap:10px; padding:10px; overflow:hidden; }
-  .map-wrap { flex: 1 1 auto; background:#0a0f14; border:1px solid var(--panel-line); border-radius:4px; overflow:hidden; }
-  .map-container { width: 100%; height: 100%; background:#0a0f14; }
+  .sp-side { width:380px; max-width:42vw; display:grid; grid-template-rows:auto 1fr; gap:10px; overflow:hidden; min-width:0; }
+  .sp-box { background:var(--panel-bg-2); border:1px solid var(--panel-line); border-radius:4px; padding:8px 10px; display:flex; flex-direction:column; min-height:0; }
+  .sp-box h3 { margin:0 0 6px; font-size:15px; font-weight:600; }
+  .sp-scroll { flex:1 1 auto; overflow:auto; min-height:0; touch-action: pan-y; }
 
-  .side-panel { width: 380px; max-width: 42vw; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
-  .panel-box { background: var(--panel-bg-2); border:1px solid var(--panel-line); border-radius:4px; padding:10px; color: var(--text-primary); display:flex; flex-direction:column; min-height:0; }
-  .panel-box h3 { margin:0 0 8px; font-size:16px; font-weight:600; }
-  .panel-scroll { flex:1 1 auto; overflow:auto; min-height:0; }
+  .sp-bottom { padding:0 10px 4px; min-width:0; }
+  .sp-media-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; height:100%; align-items:stretch; min-width:0; }
+  .sp-media { background:#111722; border:2px solid var(--grid-border); border-radius:6px; display:flex; flex-direction:column; overflow:hidden; height:100%; min-width:0; }
+  .sp-media-head { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; color:#cfd8dc; padding:6px 8px; font-size:12px; background:#0f1b27; border-bottom:1px solid var(--panel-line); }
+  .sp-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:calc(100% - 24px); }
+  .sp-close { width:20px; height:20px; border:none; color:#ccd; background:transparent; cursor:pointer; }
+  .sp-close:hover { color:#fff; }
+  .sp-media-body { position:relative; flex:1 1 auto; min-height:0; background:#000; display:flex; align-items:center; justify-content:center; }
+  .sp-media-body canvas { width:100%; height:100%; display:block; }
+  .sp-placeholder { color:#567; font-size:12px; }
 
-  .bottom-row { padding:0 10px 10px; }
-  .media-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; height:100%; }
-  .media-cell { background:#111722; border: 2px solid var(--grid-border); border-radius:6px; display:flex; flex-direction:column; overflow:hidden; }
-  .media-head { flex: 0 0 auto; display:flex; align-items:center; justify-content:space-between; color:#cfd8dc; padding:6px 8px; font-size:12px; background:#0f1b27; border-bottom:1px solid var(--panel-line); }
-  .media-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: calc(100% - 24px); }
-  .media-close { width:20px; height:20px; border:none; color:#ccd; background:transparent; cursor:pointer; }
-  .media-close:hover { color:#fff; }
-  .media-body { position:relative; flex:1 1 auto; background:#000; display:flex; align-items:center; justify-content:center; }
-  .media-body canvas { width:100%; height:100%; display:block; }
-  .media-placeholder { color:#567; font-size:12px; }
+  .sp-filters { padding:8px 10px; border-bottom:1px solid var(--panel-line); }
+  .sp-filters label { color:var(--text-dim); }
+  .sp-filters input, .sp-filters select { background:#0b121a; color:#cfd8dc; border:1px solid var(--panel-line); border-radius:4px; padding:4px 6px; }
+  .sp-filters .btn { background:#122133; color:#cfd8dc; border:1px solid var(--panel-line); }
+  .sp-filters .btn:hover { background:#17314d; }
 
-  /* 左侧过滤器与树：树内部可滚动 */
-  .filters { padding: 10px 12px; border-bottom: 1px solid var(--panel-line); }
-  .filters label { color: var(--text-dim); }
-  .filters input, .filters select {
-    background: #0b121a; color: var(--text-primary); border: 1px solid var(--panel-line); border-radius: 4px; padding: 4px 6px;
-  }
-  .filters .btn { background: #122133; color: var(--text-primary); border: 1px solid var(--panel-line); }
-  .filters .btn:hover { background: #17314d; }
-  .filters .only-online { text-align:left; }
-  .filters .only-online label { display:inline-flex; align-items:center; gap:6px; }
+  .sp-tree { flex:1 1 auto; overflow:auto; color:#cfd8dc; background:var(--panel-bg); min-height:0; }
+  .sp-gdt { padding:6px 8px; width:max-content; min-width:100%; }
+  .sp-node + .sp-node { margin-top:6px; }
+  .sp-row { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; cursor:pointer; user-select:none; }
+  .sp-row:hover { background:#0e1a24; }
+  .sp-toggle { width:16px; text-align:center; color:#9fb1bb; }
+  .sp-toggle.is-empty { visibility:hidden; }
+  .sp-ic-user { display:none !important; }
+  .sp-ic-dev { width:12px; height:12px; border-radius:2px; background:linear-gradient(135deg,#5aa0ff,#3d89ff); display:inline-block; }
+  .sp-title2 { white-space:nowrap; }
+  .sp-row.is-online .sp-title2 { color: var(--online-text); }
+  .sp-row.is-offline .sp-title2 { color: var(--offline-text); }
 
-  .device-tree { flex:1 1 auto; overflow:auto; color: var(--text-primary); background: var(--panel-bg); }
-  .gdt-tree { padding:6px 8px; width:max-content; min-width:100%; }
-  .gdt-node + .gdt-node { margin-top:6px; }
-  .gdt-row { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; cursor:pointer; user-select:none; }
-  .gdt-row:hover { background:#0e1a24; }
-  .gdt-toggle { width:16px; text-align:center; color:#9fb1bb; }
-  .gdt-toggle.is-empty { visibility:hidden; }
-  .gdt-icon { width:14px; height:14px; display:inline-block; }
-  .gdt-icon-user { background:linear-gradient(135deg,#6a8,#3a6); border-radius:50%; }
-  .gdt-icon-device { background:linear-gradient(135deg,#88a,#4653d3); border-radius:3px; }
-  .gdt-title { white-space:nowrap; }
-  .gdt-row.is-online .gdt-title { color: var(--online-text); }
-  .gdt-row.is-offline .gdt-title { color: var(--offline-text); }
-  .gdt-children { margin-left: 18px; border-left:1px dashed rgba(255,255,255,.12); padding-left: 10px; }
-  .gdt-children.is-collapsed { display:none; }
-  .gdt-node--device { padding:2px 6px 2px 22px; display:flex; align-items:center; gap:6px; cursor:pointer; }
-  .gdt-node--device:hover { background:#0e1a24; border-radius:4px; }
+  .sp-children { margin-left:18px; border-left:1px dashed rgba(255,255,255,.12); padding-left:10px; }
+  .sp-children.is-collapsed { display:none; }
+  .sp-dev { padding:2px 6px 2px 22px; display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .sp-dev:hover { background:#0e1a24; border-radius:4px; }
+  .sp-dev.is-online .sp-ic-dev { background:linear-gradient(135deg,#5aa0ff,#3d89ff); }
+  .sp-dev.is-offline .sp-ic-dev { background:#5b6b78; }
 
-  .gdt-section { margin: 8px 8px 12px; }
-  .gdt-section__title { font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e; border-radius:4px; border: 1px solid rgba(255,255,255,.08); }
-  .gdt-list { padding:6px 8px; display:flex; flex-direction:column; gap:4px; }
-  .gdt-chip { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:4px; cursor:pointer; background: transparent; border: 1px solid transparent; }
-  .gdt-chip:hover { background: #15202b; border-color: rgba(255,255,255,.08); }
-  .gdt-chip .gdt-title { white-space: nowrap; }
-  .gdt-chip.is-online .gdt-title { color: var(--online-text); }
-  .gdt-chip.is-offline .gdt-title { color: var(--offline-text); }
+  .sp-sec { margin:8px 8px 12px; }
+  .sp-sec__title { font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e; border-radius:4px; border:1px solid rgba(255,255,255,.08); }
+  .sp-list { padding:6px 8px; display:flex; flex-direction:column; gap:4px; }
+  .sp-chip { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:4px; cursor:pointer; background:transparent; border:1px solid transparent; }
+  .sp-chip:hover { background:#15202b; border-color:rgba(255,255,255,.08); }
+  .sp-list .sp-ic-dev { width:12px; height:12px; border-radius:2px; display:inline-block; }
+  .sp-chip.is-online .sp-ic-dev { background:linear-gradient(135deg,#5aa0ff,#3d89ff); }
+  .sp-chip.is-offline .sp-ic-dev { background:#5b6b78; }
   `;
-  const style = document.createElement('style');
-  style.id = __SITE_STYLE_ID;
-  style.textContent = css;
-  document.head.appendChild(style);
-  __SITE_STYLE_INJECTED = true;
+  SP_ROOT.appendChild(s);
 }
 
-/* ---------- 页面挂载/卸载 ---------- */
 const LS_LEFT_WIDTH_KEY = 'site.left.width';
 const MIN_LEFT_WIDTH = 240;
 const MAX_LEFT_WIDTH_VW = 50;
 
 export function mountSitePage() {
-  injectSiteStylesOnce();
-
-  // 禁止整页滚动
   __prevHtmlOverflow = document.documentElement.style.overflow;
   __prevBodyOverflow = document.body.style.overflow;
   document.documentElement.style.overflow = 'hidden';
   document.body.style.overflow = 'hidden';
 
   const main = document.getElementById('mainView');
-  main.innerHTML = `
-    <div class="site-page">
-      <div class="site-layout" id="siteLayout">
-        <div class="site-left" id="siteLeft">
-          <div class="filters">
+  __prevMainStyle = {
+    padding: main.style.padding,
+    overflow: main.style.overflow,
+    position: main.style.position,
+    height: main.style.height,
+  };
+  main.innerHTML = '';
+  main.style.padding = '0';
+  main.style.overflow = 'hidden';
+  if (!getComputedStyle(main).position || getComputedStyle(main).position === 'static') main.style.position = 'relative';
+  const fitMainHeight = () => {
+    const top = main.getBoundingClientRect().top;
+    const h = window.innerHeight - top;
+    if (h > 0) main.style.height = h + 'px';
+  };
+  fitMainHeight();
+  window.addEventListener('resize', fitMainHeight);
+
+  SP_HOST = document.createElement('div');
+  SP_HOST.style.position = 'absolute';
+  SP_HOST.style.inset = '0';
+  main.appendChild(SP_HOST);
+  SP_ROOT = SP_HOST.attachShadow({ mode: 'open' });
+
+  injectStyles();
+
+  SP_ROOT.innerHTML += `
+    <div class="sp-page">
+      <div class="sp-layout" id="spLayout">
+        <div class="sp-left" id="spLeft">
+          <div class="sp-filters">
             <div><label>设备类型：<select id="fltDevType"><option value="0">全部</option></select></label></div>
             <div><label>设备模式：<select id="fltDevMode"><option value="0">全部</option></select></label></div>
             <div><label>名称/编号：<input id="fltSearch" placeholder="模糊搜索"/></label></div>
             <div class="only-online"><label><input type="checkbox" id="fltOnline"/> 仅显示在线</label></div>
             <div><button class="btn btn-sm" id="btnSiteRefresh">刷新</button></div>
           </div>
-          <div class="device-tree" id="deviceTree"></div>
+          <div class="sp-tree" id="deviceTree"></div>
         </div>
-
-        <div class="site-splitter" id="siteSplitter" title="拖动调整左侧宽度"></div>
-
-        <div class="site-center">
-          <div class="top-row">
-            <div class="map-wrap"><div id="mapContainer" class="map-container">地图加载中...</div></div>
-            <div class="side-panel">
-              <div class="panel-box">
+        <div class="sp-splitter" id="spSplitter" title="拖动调整左侧宽度"></div>
+        <div class="sp-center">
+          <div class="sp-top">
+            <div class="sp-map-wrap"><div id="mapContainer" class="sp-map">地图加载中...</div></div>
+            <div class="sp-side">
+              <div class="sp-box">
                 <h3>设备状态</h3>
                 <div id="summaryChart"></div>
               </div>
-              <div class="panel-box">
+              <div class="sp-box">
                 <h3>通知列表</h3>
-                <div id="notifyList" class="panel-scroll"></div>
+                <div id="notifyList" class="sp-scroll"></div>
               </div>
             </div>
           </div>
-
-          <div class="bottom-row">
-            <div class="media-grid" id="mediaGrid">
-              ${[0,1,2,3].map(i => `
-                <div class="media-cell" data-idx="${i}">
-                  <div class="media-head">
-                    <div class="media-title" id="mediaTitle${i}">空闲</div>
-                    <button class="media-close" data-close="${i}" title="关闭">✕</button>
+          <div class="sp-bottom">
+            <div class="sp-media-grid" id="mediaGrid">
+              ${mediaSlots.map(s => `
+                <div class="sp-media" data-idx="${s.idx}">
+                  <div class="sp-media-head">
+                    <div class="sp-title" id="mediaTitle${s.idx}">空闲</div>
+                    <button class="sp-close" data-close="${s.idx}" title="关闭">✕</button>
                   </div>
-                  <div class="media-body" id="mediaBody${i}">
-                    <div class="media-placeholder">在此显示视频流或模式</div>
+                  <div class="sp-media-body" id="mediaBody${s.idx}">
+                    <div class="sp-placeholder">在此显示视频流或模式</div>
                   </div>
                 </div>
               `).join('')}
@@ -224,125 +214,131 @@ export function mountSitePage() {
   bindFilters();
   initMediaGrid();
 
+  // 右下关闭按钮：事件代理确保始终可用
+  $id('mediaGrid').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.sp-close');
+    if (!btn) return;
+    const idx = Number(btn.getAttribute('data-close'));
+    if (!Number.isNaN(idx)) closeMediaSlot(idx);
+  });
+
   unsubSite = siteState.subscribe(renderSite);
-  unsubPreview = previewState.subscribe(()=>{});
+  unsubPreview = previewState.subscribe(() => {});
 
   loadBaseData();
   initAMap();
   ensureWS();
   setupRouteWatcher();
-
-  window.addEventListener('resize', onWindowResize);
 }
 
-export function unmountSitePage() {
-  teardownPage();
-}
+export function unmountSitePage() { teardownPage(); }
 
 function teardownPage() {
+  document.documentElement.style.overflow = __prevHtmlOverflow;
+  document.body.style.overflow = __prevBodyOverflow;
+
   unsubSite && unsubSite(); unsubSite = null;
   unsubPreview && unsubPreview(); unsubPreview = null;
 
   window.removeEventListener('resize', onWindowResize);
   removeRouteWatcher();
 
-  // 恢复整页滚动设置
-  document.documentElement.style.overflow = __prevHtmlOverflow;
-  document.body.style.overflow = __prevBodyOverflow;
-
   closeInfoWindow();
   destroyAMap();
   destroyAllMediaSlots();
+
+  const main = document.getElementById('mainView');
+  if (__prevMainStyle && main) {
+    main.style.padding = __prevMainStyle.padding;
+    main.style.overflow = __prevMainStyle.overflow;
+    main.style.position = __prevMainStyle.position;
+    main.style.height = __prevMainStyle.height;
+  }
+  if (SP_HOST) { try { SP_HOST.remove(); } catch {} SP_HOST = null; SP_ROOT = null; }
 }
 
-/* ---------- 左侧栏宽度拖拽 ---------- */
-let splitterMoveHandler = null;
-let splitterUpHandler = null;
-
+/* ---------------- 分隔条拖拽（body 级玻璃层，稳定且仅拖拽期间占用） ---------------- */
 function initSplitter() {
-  const layout = document.getElementById('siteLayout');
-  const left = document.getElementById('siteLeft');
-  const splitter = document.getElementById('siteSplitter');
+  const layout = $id('spLayout');
+  const left = $id('spLeft');
+  const splitter = $id('spSplitter');
 
   const saved = Number(localStorage.getItem(LS_LEFT_WIDTH_KEY));
-  if (saved && saved >= MIN_LEFT_WIDTH) {
-    left.style.width = saved + 'px';
-    document.documentElement.style.setProperty('--site-left-width', saved + 'px');
-  }
+  if (saved && saved >= MIN_LEFT_WIDTH) left.style.width = saved + 'px';
 
   splitter.addEventListener('mousedown', (e) => {
-    splitter.classList.add('dragging');
     const bounds = layout.getBoundingClientRect();
     const maxPx = Math.floor(window.innerWidth * (MAX_LEFT_WIDTH_VW / 100));
-    splitterMoveHandler = (ev) => {
-      const x = ev.clientX - bounds.left;
+    splitter.classList.add('dragging');
+
+    const glass = document.createElement('div');
+    Object.assign(glass.style, {
+      position: 'fixed', inset: '0', cursor: 'col-resize', zIndex: '2147483646', background: 'transparent'
+    });
+    document.body.appendChild(glass);
+
+    const move = (ev) => {
+      const x = (ev.clientX ?? 0) - bounds.left;
       const w = clamp(Math.round(x), MIN_LEFT_WIDTH, maxPx);
       left.style.width = w + 'px';
-      document.documentElement.style.setProperty('--site-left-width', w + 'px');
-      throttleMapResize();
+      try { mapInstance && mapInstance.resize(); } catch {}
+      ev.preventDefault();
     };
-    splitterUpHandler = () => {
+    const cleanup = () => {
       splitter.classList.remove('dragging');
+      try { glass.remove(); } catch {}
       const w = parseInt(left.style.width || getComputedStyle(left).width, 10);
       if (w) localStorage.setItem(LS_LEFT_WIDTH_KEY, String(w));
-      try { mapInstance && mapInstance.resize(); } catch {}
-      document.removeEventListener('mousemove', splitterMoveHandler);
-      document.removeEventListener('mouseup', splitterUpHandler);
-      splitterMoveHandler = null; splitterUpHandler = null;
+      requestAnimationFrame(() => { try { mapInstance && mapInstance.resize(); } catch {} });
+      setTimeout(() => { try { mapInstance && mapInstance.resize(); } catch {} }, 100);
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', cleanup);
+      window.removeEventListener('pointerup', cleanup);
+      window.removeEventListener('blur', cleanup);
+      document.removeEventListener('visibilitychange', cleanup);
     };
-    document.addEventListener('mousemove', splitterMoveHandler);
-    document.addEventListener('mouseup', splitterUpHandler);
+
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', cleanup, { once: true });
+    window.addEventListener('pointerup', cleanup, { once: true });
+    window.addEventListener('blur', cleanup, { once: true });
+    document.addEventListener('visibilitychange', cleanup, { once: true });
     e.preventDefault();
   });
 }
 
-function onWindowResize() {
-  try { mapInstance && mapInstance.resize(); } catch {}
-}
-const throttleMapResize = throttle(()=>{ try { mapInstance && mapInstance.resize(); } catch {} }, 60);
+function onWindowResize() { try { mapInstance && mapInstance.resize(); } catch {} }
 
-/* ---------- 路由监听（离开 /site 清理，返回重建） ---------- */
+/* ---------------- 路由监听 ---------------- */
 function setupRouteWatcher() {
   removeRouteWatcher();
   const handler = () => {
     const isSite = String(location.hash || '').includes('/site');
-    if (!isSite) {
-      closeInfoWindow();
-      destroyAMap();
-      destroyAllMediaSlots();
-      return;
-    }
-    // 回到现场管理：稳妥初始化并多次 resize 提升成功率
+    if (!isSite) { closeInfoWindow(); destroyAMap(); destroyAllMediaSlots(); return; }
     initAMap().then(() => {
       requestAnimationFrame(() => { try { mapInstance && mapInstance.resize(); } catch {} });
       setTimeout(() => { try { mapInstance && mapInstance.resize(); } catch {} }, 120);
     });
   };
   window.addEventListener('hashchange', handler);
-  routeWatcher = handler;
-  handler();
+  routeWatcher = handler; handler();
 }
-function removeRouteWatcher() {
-  if (routeWatcher) {
-    window.removeEventListener('hashchange', routeWatcher);
-    routeWatcher = null;
-  }
-}
+function removeRouteWatcher() { if (routeWatcher) { window.removeEventListener('hashchange', routeWatcher); routeWatcher = null; } }
 
-/* ---------- 过滤与数据 ---------- */
+/* ---------------- 过滤/数据 ---------------- */
 function bindFilters() {
-  const left = document.getElementById('siteLeft');
+  const left = $id('spLeft');
   left.addEventListener('change', e => {
     if (['fltDevType','fltDevMode','fltOnline'].includes(e.target.id)) updateFilters();
   });
-  left.querySelector('#fltSearch').addEventListener('input', debounce(updateFilters,300));
-  left.querySelector('#btnSiteRefresh').addEventListener('click', () => loadBaseData(true));
+  $id('fltSearch').addEventListener('input', debounce(updateFilters, 300));
+  $id('btnSiteRefresh').addEventListener('click', () => loadBaseData(true));
 }
 function updateFilters() {
-  const devType = Number(document.getElementById('fltDevType').value);
-  const devMode = Number(document.getElementById('fltDevMode').value);
-  const filterOnline = document.getElementById('fltOnline').checked;
-  const searchStr = document.getElementById('fltSearch').value.trim();
+  const devType = Number($id('fltDevType').value);
+  const devMode = Number($id('fltDevMode').value);
+  const filterOnline = $id('fltOnline').checked;
+  const searchStr = $id('fltSearch').value.trim();
   const filters = { ...siteState.get().filters, devType, devMode, filterOnline, searchStr };
   siteState.set({ filters });
   loadDeviceTrees();
@@ -354,12 +350,8 @@ function loadBaseData() {
       fillDevTypeSelect(types.devTypeList || []);
       fillDevModeSelect(modes.devModeList || []);
       siteState.set({
-        notifications: (online.list || []).slice(0,50),
-        summary: {
-          total: summary.total,
-          onlineCount: summary.onlineCount,
-          stateList: summary.stateList || []
-        }
+        notifications: (online.list || []).slice(0, 50),
+        summary: { total: summary.total, onlineCount: summary.onlineCount, stateList: summary.stateList || [] }
       });
       loadDeviceTrees();
     })
@@ -368,13 +360,9 @@ function loadBaseData() {
 function loadDeviceTrees() {
   const filters = siteState.get().filters;
   Promise.all([apiGroupedDevices(filters), apiUngroupedDevices(filters)])
-    .then(([g,u]) => {
-      siteState.set({
-        groupedDevices: g.devList || [],
-        ungroupedDevices: u.devList || []
-      });
-      buildTree();
-      buildMarkers();
+    .then(([g, u]) => {
+      siteState.set({ groupedDevices: g.devList || [], ungroupedDevices: u.devList || [] });
+      buildTree(); buildMarkers();
     })
     .catch(err => {
       console.error('[Site] loadDeviceTrees error', err);
@@ -384,31 +372,21 @@ function loadDeviceTrees() {
 }
 function loadSummary() {
   apiDeviceSummary()
-    .then(summary => {
-      siteState.set({
-        summary: {
-          total: summary.total,
-          onlineCount: summary.onlineCount,
-          stateList: summary.stateList || []
-        }
-      });
-    })
+    .then(summary => { siteState.set({ summary: { total: summary.total, onlineCount: summary.onlineCount, stateList: summary.stateList || [] } }); })
     .catch(err => console.error('[Site] loadSummary error', err));
 }
 function fillDevTypeSelect(list) {
-  const sel = document.getElementById('fltDevType');
-  const cur = sel.value;
+  const sel = $id('fltDevType'); const cur = sel.value;
   sel.innerHTML = `<option value="0">全部</option>` + list.map(t => `<option value="${t.typeId}">${t.typeName}</option>`).join('');
   sel.value = cur || '0';
 }
 function fillDevModeSelect(list) {
-  const sel = document.getElementById('fltDevMode');
-  const cur = sel.value;
+  const sel = $id('fltDevMode'); const cur = sel.value;
   sel.innerHTML = `<option value="0">全部</option>` + list.map(m => `<option value="${m.modeId}">${m.modeName}</option>`).join('');
   sel.value = cur || '0';
 }
 
-/* ---------- 树（根为当前用户；根行不显示角色名；在线状态来自 onlineState） ---------- */
+/* ---------------- 树：恢复旧结构 + 占位父节点兜底 ---------------- */
 function normalizeUserInfo(ui) {
   if (!ui) return null;
   return {
@@ -429,26 +407,34 @@ function getCurrentUserStrict() {
   return null;
 }
 function buildUserForestFromGroupedDevices(groupedDevices) {
+  // 1) 先把所有出现在 userInfo 的用户放入 map
   const userMap = new Map();
   groupedDevices.forEach(entry => {
     const ui = normalizeUserInfo(entry.userInfo);
     if (!ui || ui.userId == null) return;
     if (!userMap.has(ui.userId)) {
       userMap.set(ui.userId, { ...ui, type: 'user', children: [], deviceChildren: [], isOnline: ui.onlineState });
-    } else {
-      const cur = userMap.get(ui.userId);
-      userMap.set(ui.userId, { ...cur, ...ui, children: cur.children, deviceChildren: cur.deviceChildren, isOnline: cur.isOnline ?? ui.onlineState });
     }
   });
+  // 2) 占位父节点兜底（父节点可能没有设备但需要出现在树上）
+  userMap.forEach(node => {
+    const pid = node.parentUserId;
+    if (pid != null && !userMap.has(pid)) {
+      userMap.set(pid, { userId: pid, userName: '', parentUserId: null, type: 'user', children: [], deviceChildren: [], isOnline: false, placeholder: true });
+    }
+  });
+  // 3) 挂设备到对应用户
   groupedDevices.forEach(entry => {
     const ui = normalizeUserInfo(entry.userInfo); const di = entry.devInfo || {};
     if (!ui || ui.userId == null) return;
     const node = userMap.get(ui.userId); if (!node) return;
     node.deviceChildren.push({ type:'device', devId: di.id, devName: di.no || di.name || String(di.id || ''), onlineState: !!di.onlineState, raw: di });
   });
-  userMap.forEach(node => { node.children = node.children || []; });
-  userMap.forEach(node => { const pid = node.parentUserId; if (pid != null && userMap.has(pid)) userMap.get(pid).children.push(node); });
+  // 4) 挂用户到父用户
+  userMap.forEach(n => { n.children = n.children || []; });
+  userMap.forEach(n => { const pid = n.parentUserId; if (pid != null && userMap.has(pid)) userMap.get(pid).children.push(n); });
 
+  // 5) 计算在线（沿袭旧逻辑）
   function computeOnline(n) {
     if (typeof n.isOnline === 'boolean') return n.isOnline;
     let online = n.deviceChildren?.some(d => d.onlineState) || false;
@@ -457,59 +443,72 @@ function buildUserForestFromGroupedDevices(groupedDevices) {
   }
   userMap.forEach(n => computeOnline(n));
 
+  // 6) 选择根：优先当前用户；若当前用户不在 map，则找无父级或父丢失者
   const cu = getCurrentUserStrict();
-  if (cu?.userId != null && userMap.has(cu.userId)) {
-    const root = userMap.get(cu.userId);
-    root.parentUserId = null; // 切断上级
-    return { roots: [root] };
+  if (cu?.userId != null) {
+    if (userMap.has(cu.userId)) {
+      const root = userMap.get(cu.userId);
+      root.parentUserId = null;
+      return { roots: [root] };
+    } else {
+      // 当前用户不在 map，用占位根，把所有 parentUserId===cu.userId 的一层挂上来
+      const root = { userId: cu.userId, userName: cu.userName || cu.name || '当前用户', parentUserId: null, type:'user', children: [], deviceChildren: [], isOnline: false, placeholder: true };
+      userMap.forEach(n => { if (n.parentUserId === cu.userId) root.children.push(n); });
+      return { roots: [root] };
+    }
   }
-  const roots = []; userMap.forEach(n => { if (n.parentUserId == null || !userMap.has(n.parentUserId)) roots.push(n); });
+  const roots = [];
+  userMap.forEach(n => { if (n.parentUserId == null || !userMap.has(n.parentUserId)) roots.push(n); });
   return { roots };
 }
 function renderUserNodeHTML(node, level = 1, expandLevel = 2) {
   const hasChildren = (node.children && node.children.length) || (node.deviceChildren && node.deviceChildren.length);
   const expanded = level <= expandLevel;
   const rowOnlineCls = node.isOnline ? 'is-online' : 'is-offline';
+  const safeName = node.userName || '(未命名用户)';
   const header = `
-    <div class="gdt-row ${rowOnlineCls}" data-node-type="user" data-user-id="${node.userId}">
-      <span class="gdt-toggle ${hasChildren ? '' : 'is-empty'}">${hasChildren ? (expanded ? '▾' : '▸') : ''}</span>
-      <span class="gdt-icon gdt-icon-user"></span>
-      <span class="gdt-title" title="${escapeHTML(node.userName)}">${escapeHTML(node.userName || '(未命名用户)')}</span>
+    <div class="sp-row ${rowOnlineCls}" data-node-type="user" data-user-id="${node.userId}">
+      <span class="sp-toggle ${hasChildren ? '' : 'is-empty'}">${hasChildren ? (expanded ? '▾' : '▸') : ''}</span>
+      <span class="sp-ic-user"></span>
+      <span class="sp-title2" title="${escapeHTML(safeName)}">${escapeHTML(safeName)}</span>
     </div>`;
-  const childrenHTML = `
-    <div class="gdt-children ${expanded ? '' : 'is-collapsed'}">
+  const childrenHTML = hasChildren ? `
+    <div class="sp-children ${expanded ? '' : 'is-collapsed'}">
       ${(node.children || []).map(child => renderUserNodeHTML(child, level + 1, expandLevel)).join('')}
       ${(node.deviceChildren || []).map(d => `
-        <div class="gdt-node gdt-node--device ${d.onlineState ? 'is-online' : 'is-offline'}" data-devid="${d.devId}">
-          <span class="gdt-icon gdt-icon-device"></span>
-          <span class="gdt-title" title="${escapeHTML(d.devName)}">${escapeHTML(d.devName)}</span>
+        <div class="sp-node sp-dev ${d.onlineState ? 'is-online' : 'is-offline'}" data-devid="${d.devId}">
+          <span class="sp-ic-dev"></span>
+          <span class="sp-title2" title="${escapeHTML(d.devName)}">${escapeHTML(d.devName)}</span>
         </div>
       `).join('')}
-    </div>`;
-  return `<div class="gdt-node gdt-node--user" data-user-id="${node.userId}">${header}${hasChildren ? childrenHTML : ''}</div>`;
+    </div>` : '';
+  return `<div class="sp-node sp-user" data-user-id="${node.userId}">${header}${childrenHTML}</div>`;
 }
 function buildTree() {
-  const treeEl = document.getElementById('deviceTree');
+  const treeEl = $id('deviceTree');
   const { groupedDevices, ungroupedDevices } = siteState.get();
   const { roots } = buildUserForestFromGroupedDevices(groupedDevices);
   const expandLevel = 2;
   const treeHTML = `
-    <div class="gdt-tree">${roots.map(root => renderUserNodeHTML(root, 1, expandLevel)).join('')}</div>
-    <div class="gdt-section">
-      <div class="gdt-section__title">未分组设备 (${ungroupedDevices.length})</div>
-      <div class="gdt-list">
+    <div class="sp-gdt">${roots.map(root => renderUserNodeHTML(root, 1, expandLevel)).join('')}</div>
+    <div class="sp-sec">
+      <div class="sp-sec__title">未分组设备 (${ungroupedDevices.length})</div>
+      <div class="sp-list">
         ${ungroupedDevices.map(e => {
           const d = e.devInfo || {}; const name = d.no || d.name || String(d.id || ''); const cls = d.onlineState ? 'is-online' : 'is-offline';
-          return `<div class="gdt-chip ${cls}" data-devid="${d.id}" title="${escapeHTML(name)}"><span class="gdt-icon gdt-icon-device"></span><span class="gdt-title">${escapeHTML(name)}</span></div>`;
+          return `<div class="sp-chip ${cls}" data-devid="${d.id}" title="${escapeHTML(name)}">
+            <span class="sp-ic-dev"></span><span class="sp-title2">${escapeHTML(name)}</span>
+          </div>`;
         }).join('')}
       </div>
     </div>`;
   treeEl.innerHTML = treeHTML;
 
+  // 展开/收起 + 打开设备
   treeEl.addEventListener('click', (e) => {
-    const row = e.target.closest('.gdt-row');
+    const row = e.target.closest('.sp-row');
     if (row && treeEl.contains(row)) {
-      const nodeEl = row.parentElement; const children = nodeEl.querySelector(':scope > .gdt-children'); const toggle = row.querySelector('.gdt-toggle');
+      const nodeEl = row.parentElement; const children = nodeEl.querySelector(':scope > .sp-children'); const toggle = row.querySelector('.sp-toggle');
       if (children) { const collapsed = children.classList.toggle('is-collapsed'); if (toggle) toggle.textContent = collapsed ? '▸' : '▾'; }
       return;
     }
@@ -520,15 +519,13 @@ function buildTree() {
   }, { passive: true });
 }
 
-/* ---------- 地图（高德） + InfoWindow ---------- */
+/* ---------------- 地图：拖拽/缩放彻底打通 ---------------- */
 function ensureAMapReady() {
   return new Promise((resolve, reject) => {
     if (window.AMap) return resolve();
     const id = 'amap-sdk-v2';
     if (document.getElementById(id)) {
-      const wait = setInterval(() => {
-        if (window.AMap) { clearInterval(wait); resolve(); }
-      }, 50);
+      const wait = setInterval(() => { if (window.AMap) { clearInterval(wait); resolve(); } }, 50);
       setTimeout(() => { clearInterval(wait); if (!window.AMap) reject(new Error('AMap not ready')); }, 6000);
       return;
     }
@@ -540,41 +537,34 @@ function ensureAMapReady() {
     document.head.appendChild(s);
   });
 }
-
 async function initAMap() {
-  const container = document.getElementById('mapContainer');
-  if (!container) return;
-  if (mapInstance) {
-    try { mapInstance.resize(); } catch {}
-    return;
-  }
+  const container = $id('mapContainer'); if (!container) return;
+  if (mapInstance) { try { mapInstance.resize(); } catch {} return; }
   try {
     await ensureAMapReady();
-    // 确保容器进入布局流
     await new Promise(r => requestAnimationFrame(r));
-    createMap();
-    // 观察容器尺寸变化，变化时强制 resize
-    if (!mapResizeObs) {
-      mapResizeObs = new ResizeObserver(() => {
-        try { mapInstance && mapInstance.resize(); } catch {}
-      });
-      mapResizeObs.observe(container);
-    }
-  } catch (e) {
-    console.error('[Site] initAMap failed', e);
-  }
-}
 
-function createMap() {
-  try {
+    // 在捕获阶段阻断外层 wheel/drag/touch 拦截，保证 AMap 能拿到原始事件
+    const stopCap = (e) => { e.stopPropagation(); };
+    ['wheel','mousewheel','DOMMouseScroll','touchstart','touchmove','touchend','pointerdown','pointermove','pointerup','mousedown','mousemove','mouseup','contextmenu']
+      .forEach(evt => container.addEventListener(evt, stopCap, { capture:true, passive:false }));
+
     // eslint-disable-next-line no-undef
-    mapInstance = new AMap.Map('mapContainer', { zoom: 5, center: [105.0, 35.0] });
+    mapInstance = new AMap.Map(container, { zoom: 5, center: [105.0, 35.0], viewMode: '2D', dragEnable: true, scrollWheel: true, keyboardEnable: true, doubleClickZoom: true });
+    try { mapInstance.setStatus && mapInstance.setStatus({ dragEnable: true, scrollWheel: true, keyboardEnable: true, doubleClickZoom: true }); } catch {}
     buildMarkers();
-  } catch (e) {
-    console.error('[Site] createMap error', e);
-  }
-}
 
+    const obs = new ResizeObserver(() => { try { mapInstance && mapInstance.resize(); } catch {} });
+    obs.observe(container);
+
+    mapInstance.on && mapInstance.on('mapmove', () => {
+      if (followCenter && infoWindow) {
+        const c = mapInstance.getCenter();
+        infoWindow.setPosition(c);
+      }
+    });
+  } catch (e) { console.error('[Site] initAMap failed', e); }
+}
 function buildMarkers() {
   if (!mapInstance) return;
   markersLayer.forEach(m => { try { m.setMap(null); } catch {} });
@@ -591,40 +581,29 @@ function buildMarkers() {
     markersLayer.push(marker);
   });
 }
-
 function destroyAMap() {
   try { markersLayer.forEach(m => { try { m.setMap(null); } catch {} }); } catch {}
   markersLayer = [];
-  if (mapInstance) {
-    try { mapInstance.destroy(); } catch {}
-    mapInstance = null;
-  }
-  if (mapResizeObs) {
-    try { const c = document.getElementById('mapContainer'); c && mapResizeObs.unobserve(c); } catch {}
-    mapResizeObs.disconnect?.();
-    mapResizeObs = null;
-  }
-  const mc = document.getElementById('mapContainer');
-  if (mc) mc.innerHTML = '地图加载中...';
+  if (mapInstance) { try { mapInstance.destroy(); } catch {} mapInstance = null; }
 }
 
-/* InfoWindow（跟随标注点） */
-function closeInfoWindow() {
-  try { if (infoWindow) infoWindow.close(); } catch {}
-  infoWindow = null;
-  currentInfoDevId = null;
-}
+function closeInfoWindow() { try { if (infoWindow) infoWindow.close(); } catch {} infoWindow = null; followCenter = false; }
 function openDeviceOverlay(devId) {
   apiDeviceInfo(devId).then(data => {
     const info = data.devInfo;
-    currentInfoDevId = info.id;
-    const pos = info.lastLocation && info.lastLocation.lng != null && info.lastLocation.lat != null
-      ? [info.lastLocation.lng, info.lastLocation.lat]
-      : (mapInstance ? mapInstance.getCenter() : [105,35]);
+    let pos;
+    if (info.lastLocation && info.lastLocation.lng != null && info.lastLocation.lat != null) {
+      pos = [info.lastLocation.lng, info.lastLocation.lat];
+      followCenter = false;
+    } else if (mapInstance) {
+      pos = mapInstance.getCenter();
+      followCenter = true;
+    } else {
+      pos = [105, 35];
+      followCenter = false;
+    }
 
-    // 构建自定义内容 DOM
     const content = buildInfoContent(info);
-
     // eslint-disable-next-line no-undef
     if (!infoWindow) infoWindow = new AMap.InfoWindow({ isCustom: true, offset: new AMap.Pixel(0, -20), closeWhenClickMap: true });
     infoWindow.setContent(content);
@@ -649,12 +628,11 @@ function buildInfoContent(info) {
     <div style="padding:0 12px 12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
       <label>媒体：<select id="ovStreamSel"><option value="main">主码流</option></select></label>
       <button class="btn btn-sm" id="btnOpenVideo" style="padding:4px 8px;background:#1f497d;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;">打开视频</button>
-      <label style="margin-left:8px;">设备模式：<select id="ovModeSel">${(info.modeList||[]).map(m=>`<option value="${m.id}">${escapeHTML(m.name)}</option>`).join('')}</select></label>
+      <label style="margin-left:8px;">设备模式：<select id="ovModeSel">${(info.modeList||[]).map(m=>`<option value="${m.modeId}">${escapeHTML(m.modeName)}</option>`).join('')}</select></label>
       <button class="btn btn-sm" id="btnOpenMode" style="padding:4px 8px;background:#1f497d;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;">打开模式</button>
       <button class="btn btn-sm" id="btnRefreshInfo" style="margin-left:auto;padding:4px 8px;background:#203246;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;">刷新</button>
     </div>
   `;
-
   wrap.querySelector('#ovCloseBtn').addEventListener('click', () => closeInfoWindow());
   wrap.querySelector('#btnOpenVideo').addEventListener('click', () => openVideoInGrid(info.id, info.no || String(info.id || '')));
   wrap.querySelector('#btnOpenMode').addEventListener('click', () => {
@@ -665,13 +643,10 @@ function buildInfoContent(info) {
   return wrap;
 }
 
-/* ---------- 右侧面板渲染 ---------- */
-function renderSite(s) {
-  renderSummary(s.summary);
-  renderNotifications(s.notifications);
-}
+/* ---------------- 渲染右侧 ---------------- */
+function renderSite(s) { renderSummary(s.summary); renderNotifications(s.notifications); }
 function renderSummary(sum) {
-  const el = document.getElementById('summaryChart'); if (!el) return;
+  const el = $id('summaryChart'); if (!el) return;
   el.innerHTML = (sum?.stateList || []).map(item => {
     const offline = item.total - item.onlineCount;
     return `<div style="margin:6px 0;">
@@ -684,19 +659,17 @@ function renderSummary(sum) {
   }).join('');
 }
 function renderNotifications(list) {
-  const el = document.getElementById('notifyList'); if (!el) return;
+  const el = $id('notifyList'); if (!el) return;
   el.innerHTML = (list || []).map(l => {
     const displayName = l.uname || l.uid;
     return `<div style="padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.06);font-size:12px;">${formatTime(l.time)} ${escapeHTML(String(displayName))} ${l.online ? '上线' : '下线'}</div>`;
   }).join('');
 }
 
-/* ---------- 媒体格子：初始化/关闭/播放 ---------- */
+/* ---------------- 媒体（保持上版：DPR自适配、填满） ---------------- */
 function initMediaGrid() {
   mediaSlots.forEach(slot => {
-    slot.node = document.querySelector(`.media-cell[data-idx="${slot.idx}"]`);
-    const closeBtn = slot.node.querySelector(`[data-close="${slot.idx}"]`);
-    closeBtn.addEventListener('click', () => closeMediaSlot(slot.idx));
+    slot.node = SP_ROOT.querySelector(`.sp-media[data-idx="${slot.idx}"]`);
   });
 }
 function destroyAllMediaSlots() { mediaSlots.forEach(s => closeMediaSlot(s.idx)); }
@@ -705,20 +678,20 @@ function closeMediaSlot(idx) {
   if (s.timer) { clearInterval(s.timer); s.timer = null; }
   if (s.player && s.player.destroy) { try { s.player.destroy(); } catch {} }
   s.player = null; s.type = null; s.title = '';
-  const titleEl = document.getElementById(`mediaTitle${idx}`);
-  const bodyEl = document.getElementById(`mediaBody${idx}`);
+  const titleEl = $id(`mediaTitle${idx}`);
+  const bodyEl = $id(`mediaBody${idx}`);
   if (titleEl) titleEl.textContent = '空闲';
-  if (bodyEl) bodyEl.innerHTML = `<div class="media-placeholder">在此显示视频流或模式</div>`;
+  if (bodyEl) bodyEl.innerHTML = `<div class="sp-placeholder">在此显示视频流或模式</div>`;
 }
 
-/* ---------- WebRTC 依赖加载（adapter + srs.sdk） ---------- */
+/* WebRTC 依赖 */
 function ensureAdapter() {
   return new Promise((resolve) => {
     if (window.adapter) return resolve();
     const s = document.createElement('script');
-    s.src = '/js/adapter-7.4.0.min.js'; // 与你 SitePage.html 一致的路径
+    s.src = '/js/adapter-7.4.0.min.js';
     s.onload = () => resolve();
-    s.onerror = () => resolve(); // 失败也不阻塞（Chrome 一般无须 adapter）
+    s.onerror = () => resolve();
     document.head.appendChild(s);
   });
 }
@@ -740,18 +713,13 @@ function ensureSrsSdk() {
     document.head.appendChild(s);
   });
 }
-async function ensureWebRTCDeps() {
-  await ensureAdapter();
-  await ensureSrsSdk();
-}
+async function ensureWebRTCDeps() { await ensureAdapter(); await ensureSrsSdk(); }
 
-/* ---------- SRS 播放器（video+canvas 渲染） ---------- */
+/* Player：canvas + DPI 观察（保持上版） */
 function makeRenderLoop(draw){ let run=false; function loop(){ if(!run) return; draw(); requestAnimationFrame(loop);} return { start(){ if(!run){run=true; requestAnimationFrame(loop);} }, stop(){ run=false; } }; }
 function createSrsCanvasPlayer() {
   const video = document.createElement('video');
-  // 有用户点击手势，允许声音；如需静音可改为 true
   video.autoplay = true; video.muted = false; video.playsInline = true;
-  // 放到屏幕外，避免闪烁
   video.style.position='absolute'; video.style.left='-99999px'; video.style.top='-99999px';
   document.body.appendChild(video);
 
@@ -759,10 +727,23 @@ function createSrsCanvasPlayer() {
   canvas.width = 1280; canvas.height = 720;
   const ctx = canvas.getContext('2d');
 
-  let sdk=null, rotation=0, mode='fit';
+  const ro = new ResizeObserver(() => {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.floor(rect.width * dpr));
+    const h = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+    }
+  });
+  ro.observe(canvas);
+
+  let sdk=null, rotation=0, mode='fill';
+
   const loop = makeRenderLoop(()=>{
-    const w = canvas.clientWidth || canvas.width;
-    const h = canvas.clientHeight || canvas.height;
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width || 1;
+    const h = rect.height || 1;
     const vw = video.videoWidth, vh = video.videoHeight;
     if(!vw || !vh) return;
 
@@ -777,7 +758,8 @@ function createSrsCanvasPlayer() {
     if(mode==='fit'){
       const vr=videoW/videoH, cr=w/h;
       if(vr>cr){ drawW=w; drawH=w/vr; } else { drawH=h; drawW=h*vr; }
-    }
+    } else { drawW = w; drawH = h; }
+
     const sx=canvas.width/w, sy=canvas.height/h;
     if(rotation%180===0){ ctx.drawImage(video, -drawW/2*sx, -drawH/2*sy, drawW*sx, drawH*sy); }
     else { ctx.drawImage(video, -drawH/2*sx, -drawW/2*sy, drawH*sx, drawW*sy); }
@@ -790,8 +772,6 @@ function createSrsCanvasPlayer() {
     // eslint-disable-next-line no-undef
     sdk = new SrsRtcPlayerAsync();
     video.srcObject = sdk.stream;
-
-    // 调用 sdk.play；随后再显式 video.play() 以兼容性兜底
     await sdk.play(url);
     loop.start();
     try { await video.play(); } catch {}
@@ -799,30 +779,26 @@ function createSrsCanvasPlayer() {
   function destroy() {
     try { loop.stop(); } catch {}
     try { if(sdk){ sdk.close(); sdk=null; } } catch {}
+    try { ro.disconnect(); } catch {}
     try { video.srcObject = null; video.remove(); } catch {}
     try { canvas.remove(); } catch {}
   }
   return { canvas, play, destroy, setMode:(m)=>mode=m, rotate:()=>{rotation=(rotation+90)%360;} };
 }
 
-/* ---------- 视频/模式打开到底部网格 ---------- */
+/* 打开媒体 */
 async function openVideoInGrid(devId, devNo) {
   const idx = findFreeMediaSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type: 'error', message: '没有可用窗口' }); return; }
-  const bodyEl = document.getElementById(`mediaBody${idx}`);
-  const titleEl = document.getElementById(`mediaTitle${idx}`);
+  const bodyEl = $id(`mediaBody${idx}`);
+  const titleEl = $id(`mediaTitle${idx}`);
   if (!bodyEl || !titleEl) return;
 
-  try {
-    // 关键：播放前确保 adapter + srs.sdk 已加载
-    await ensureWebRTCDeps();
-  } catch (e) {
-    console.error('[SRS] load deps failed', e);
-    eventBus.emit('toast:show', { type: 'error', message: '加载 WebRTC 依赖失败（adapter/srs.sdk）' });
+  try { await ensureWebRTCDeps(); } catch (e) {
+    console.error('[SRS] deps failed', e);
+    eventBus.emit('toast:show', { type: 'error', message: '加载 WebRTC 依赖失败' });
     return;
   }
-
-  console.debug('[SRS] play start', { idx, url: SRS_FIXED_URL, devId, devNo });
 
   const player = createSrsCanvasPlayer();
   bodyEl.innerHTML = '';
@@ -831,25 +807,20 @@ async function openVideoInGrid(devId, devNo) {
   mediaSlots[idx].type = 'video';
   mediaSlots[idx].player = player;
 
-  try {
-    await player.play(SRS_FIXED_URL);
-    console.debug('[SRS] play ok', { idx });
-  } catch (e) {
+  try { await player.play(SRS_FIXED_URL); } catch (e) {
     console.error('[SRS] play failed', e);
     titleEl.textContent = `${devNo} 视频(失败)`;
-    eventBus.emit('toast:show', { type: 'error', message: '拉流失败，请检查 webrtc 服务/证书/网络' });
-    // 失败时回收画布
+    eventBus.emit('toast:show', { type: 'error', message: '拉流失败' });
     try { player.destroy(); } catch {}
-    bodyEl.innerHTML = `<div class="media-placeholder">在此显示视频流或模式</div>`;
-    mediaSlots[idx].type = null;
-    mediaSlots[idx].player = null;
+    bodyEl.innerHTML = `<div class="sp-placeholder">在此显示视频流或模式</div>`;
+    mediaSlots[idx].type = null; mediaSlots[idx].player = null;
   }
 }
 function openModeInGrid(devId, devNo, modeId) {
   const idx = findFreeMediaSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type: 'error', message: '没有可用窗口' }); return; }
-  const bodyEl = document.getElementById(`mediaBody${idx}`);
-  const titleEl = document.getElementById(`mediaTitle${idx}`);
+  const bodyEl = $id(`mediaBody${idx}`);
+  const titleEl = $id(`mediaTitle${idx}`);
   if (!bodyEl || !titleEl) return;
 
   mediaSlots[idx].type = 'mode';
@@ -866,10 +837,10 @@ function openModeInGrid(devId, devNo, modeId) {
   </div>`;
   let state = { x: 0, y: 0, z: 0, m: 0.0, b: 100 };
   const t = setInterval(() => {
-    state.x = clamp(state.x + rand(-0.05,0.05), -5, 5);
-    state.y = clamp(state.y + rand(-0.05,0.05), -5, 5);
-    state.z = clamp(state.z + rand(-0.05,0.05), -5, 5);
-    state.m = Math.max(0, state.m + rand(0.001,0.003));
+    state.x = clamp(state.x + rand(-0.05, 0.05), -5, 5);
+    state.y = clamp(state.y + rand(-0.05, 0.05), -5, 5);
+    state.z = clamp(state.z + rand(-0.05, 0.05), -5, 5);
+    state.m = Math.max(0, state.m + rand(0.001, 0.003));
     if (state.b > 0 && Math.random() < 0.03) state.b -= 1;
 
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -883,14 +854,10 @@ function openModeInGrid(devId, devNo, modeId) {
 }
 function findFreeMediaSlot() { for (const s of mediaSlots) if (!s.type) return s.idx; return -1; }
 
-/* ---------- 通用工具 ---------- */
-function escapeHTML(str='') { return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function rand(a,b){return Math.random()*(b-a)+a;}
-function clamp(v,min,max){return v<min?min:v>max?max:v;}
-function formatTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts); const p = n => n<10?'0'+n:n;
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-function debounce(fn,ms=300){ let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args),ms); }; }
-function throttle(fn,ms=100){ let t=0, id=null, lastArgs=null; return (...args)=>{ const now=Date.now(); lastArgs=args; if(now-t>=ms){ t=now; fn(...lastArgs); } else if(!id){ id=setTimeout(()=>{ t=Date.now(); id=null; fn(...lastArgs); }, ms-(now-t)); } }; }
+/* 工具 */
+function escapeHTML(str = '') { return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function rand(a, b) { return Math.random() * (b - a) + a; }
+function clamp(v, min, max) { return v < min ? min : v > max ? max : v; }
+function formatTime(ts) { if (!ts) return ''; const d = new Date(ts); const p = n => n < 10 ? '0' + n : n; return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+function debounce(fn, ms = 300) { let t = null; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); }; }
+function throttle(fn, ms = 100) { let t = 0, id = null, lastArgs = null; return (...args) => { const now = Date.now(); lastArgs = args; if (now - t >= ms) { t = now; fn(...lastArgs); } else if (!id) { id = setTimeout(() => { t = Date.now(); id = null; fn(...lastArgs); }, ms - (now - t)); } }; }
