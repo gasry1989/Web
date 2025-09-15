@@ -1,5 +1,8 @@
 /**
- * AddUserModal - 模板化
+ * AddUserModal - 模板化（修复：打开时不再让用户列表表格高度变化）
+ * 做法：
+ * 1) 计算滚动条宽度并给 body 做 padding-right 补偿，避免 modal 改 overflow 导致布局变化
+ * 2) 打开期间把 #mainView 的高度锁定为当前像素值，关闭时完整还原
  */
 import { createModal, getModal } from '@ui/modal.js';
 import { apiUserCreate, apiRoleList, apiUserQuery } from '@api/userApi.js';
@@ -17,6 +20,9 @@ const CHILD_ROLE_ID = 3;
 
 let modalRef = null;
 const parentSearchCtx = { timer:null, lastQuery:'' };
+
+/* ---- 防抖动上下文（补偿 + 主区高度冻结） ---- */
+let __jankCtx = null;
 
 export async function showAddUserModal() {
   const exist = getModal('addUserModal');
@@ -41,6 +47,9 @@ export async function showAddUserModal() {
     footerButtons:[]
   });
 
+  // 核心修复：补偿 + 冻结主区高度（避免用户列表“变大/跳动”）
+  beginNoJank();
+
   if (!modalRef) return;
   const form = container.querySelector('#addUserForm');
   form.querySelector('[data-close]').addEventListener('click', destroyModal);
@@ -51,6 +60,80 @@ export async function showAddUserModal() {
   bindParentSearch(form);
   bindPasswordEnhance(form);
   form.addEventListener('submit', onSubmit);
+}
+
+/* ---------------- 防抖动实现 ---------------- */
+function beginNoJank() {
+  if (__jankCtx) return;
+
+  const doc  = document.documentElement;
+  const body = document.body;
+  const main = document.getElementById('mainView');
+
+  const prev = {
+    bodyPadRight: body.style.paddingRight,
+    htmlOverflow: doc.style.overflow,
+    bodyOverflow: body.style.overflow,
+    mainHeight: main ? main.style.height : ''
+  };
+
+  // 1) 计算滚动条宽度并补偿到 body.paddingRight
+  const sw = Math.max(0, window.innerWidth - doc.clientWidth);
+  if (sw > 0) {
+    const cur = parseInt(getComputedStyle(body).paddingRight || '0', 10) || 0;
+    body.style.paddingRight = (cur + sw) + 'px';
+  }
+
+  // 2) 冻结主区域高度（像素）
+  if (main) {
+    const h = Math.round(main.getBoundingClientRect().height);
+    if (h > 0) main.style.height = h + 'px';
+  }
+
+  // 3) 若外部组件切换 modal-open/overflow，保持补偿一致
+  const adjust = () => {
+    const sw2 = Math.max(0, window.innerWidth - doc.clientWidth);
+    const base = parseInt(prev.bodyPadRight || '0', 10) || 0;
+    const cur  = parseInt(getComputedStyle(body).paddingRight || '0', 10) || 0;
+    if (sw2 > 0 && cur < base + sw2) body.style.paddingRight = (base + sw2) + 'px';
+  };
+  let mo1 = null, mo2 = null;
+  try {
+    mo1 = new MutationObserver(adjust);
+    mo2 = new MutationObserver(adjust);
+    mo1.observe(doc,  { attributes:true, attributeFilter:['class','style'] });
+    mo2.observe(body, { attributes:true, attributeFilter:['class','style'] });
+  } catch {}
+
+  // 窗口尺寸变化时，维持冻结高度与补偿
+  const onResize = () => {
+    try {
+      if (main) {
+        const h = Math.round(main.getBoundingClientRect().height);
+        if (h > 0) main.style.height = h + 'px';
+      }
+      adjust();
+    } catch {}
+  };
+  window.addEventListener('resize', onResize);
+
+  __jankCtx = { prev, main, mo1, mo2, onResize };
+}
+
+function endNoJank() {
+  if (!__jankCtx) return;
+  const { prev, main, mo1, mo2, onResize } = __jankCtx;
+
+  try { window.removeEventListener('resize', onResize); } catch {}
+  try { mo1 && mo1.disconnect(); } catch {}
+  try { mo2 && mo2.disconnect(); } catch {}
+
+  try { document.body.style.paddingRight = prev.bodyPadRight || ''; } catch {}
+  try { document.documentElement.style.overflow = prev.htmlOverflow || ''; } catch {}
+  try { document.body.style.overflow = prev.bodyOverflow || ''; } catch {}
+  if (main) try { main.style.height = prev.mainHeight || ''; } catch {}
+
+  __jankCtx = null;
 }
 
 /* ---------------- Roles & Parent ---------------- */
@@ -304,5 +387,7 @@ function onSubmit(e){
 function destroyModal(){
   if(modalRef){ modalRef.close(); modalRef=null; }
   if(parentSearchCtx.timer){ clearTimeout(parentSearchCtx.timer); parentSearchCtx.timer=null; }
+  // 关闭时还原补偿与主内容高度
+  endNoJank();
 }
 function escapeHTML(str=''){ return str.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

@@ -12,7 +12,7 @@
       .add-user-modal .form-row .form-label { flex:0 0 110px; text-align:left; font-size:13px; color:#c8d0d7; line-height:1.2; }
       .add-user-modal .form-row .form-field { flex:1; display:flex; align-items:center; gap:8px; min-width:0; }
 
-      /* 统一深色输入/下拉样式 */
+      /* 统一深色输入/下拉样式（作用域化） */
       .add-user-modal input, .add-user-modal select, .add-user-modal textarea {
         width:100%; box-sizing:border-box; background:#161b21; border:1px solid #2c343c; border-radius:4px; color:#fff;
         padding:6px 10px; font-size:13px; outline:none; transition:border-color .15s;
@@ -39,7 +39,7 @@
       .add-user-modal .parent-item:hover { background:#1f2b34; color:#fff; }
       .add-user-modal .parent-item.empty { cursor:default; color:#6c7680; }
 
-      .add-user-modal .hint { font-size:12px; color:#7d8891; margin-top:4px; }
+      .add-user-modal .hint { font-size:12px; color:#7d8891; }
 
       .add-user-modal .pwd-box { position:relative; flex:1; display:flex; align-items:center; }
       .add-user-modal .pwd-box input { padding-left:34px; }
@@ -47,7 +47,9 @@
       .add-user-modal .pwd-eye:hover { color:#fff; }
 
       .add-user-modal .pwd-mini-actions { display:flex; gap:6px; }
-      .btn.btn-xs { padding:2px 8px; font-size:12px; line-height:18px; background:#1f2730; border:1px solid #2f3944; color:#cfd6dd; border-radius:4px; cursor:pointer; }
+
+      /* 关键修复：这条原来是全局 .btn.btn-xs，改为作用域，避免撑高用户列表的行高 */
+      .add-user-modal .btn.btn-xs { padding:2px 8px; font-size:12px; line-height:18px; background:#1f2730; border:1px solid #2f3944; color:#cfd6dd; border-radius:4px; cursor:pointer; }
 
       .add-user-modal .pwd-extra { display:flex; flex-direction:column; gap:6px; padding-left:110px; margin-top:-4px; }
       .add-user-modal .pwd-strength-line { display:flex; align-items:center; gap:10px; }

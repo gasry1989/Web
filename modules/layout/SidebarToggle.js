@@ -1,57 +1,86 @@
 /**
- * 侧栏折叠单按钮控制
- * - 按钮插入到 sideBar 顶部 (绝对定位)
- * - 展开状态按钮文字 «  (表示点击后会向左收起)
- * - 折叠状态按钮文字 »  (表示点击后会展开)
+ * 侧栏折叠控制（与 index.html 对齐）
+ * - 侧栏：#sidebar
+ * - 按钮：#sidebarToggle（div 也可）
+ * - 展开显示 «（可折叠），折叠显示 »（可展开）
  * - 状态持久化 localStorage
+ * - 额外：提供事件委托兜底，确保无论何时能点
  */
 const KEY = 'ui.sidebar.collapsed';
-let initialized = false;
+let inited = false;
 
 export function initSidebarToggle() {
-  if (initialized) return;
-  initialized = true;
+  if (inited) return;
+  inited = true;
 
-  const sideBar = document.getElementById('sideBar');
-  const appLayout = document.getElementById('appLayout');
-  if (!sideBar || !appLayout) return;
+  const side = document.getElementById('sidebar');
+  const btn  = document.getElementById('sidebarToggle');
 
-  // 创建按钮（如果不存在）
-  let btn = sideBar.querySelector('.sb-collapse-btn');
-  if (!btn) {
-    btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'sb-collapse-btn';
-    sideBar.appendChild(btn);
+  // 主路径：精准绑定按钮
+  if (side && btn) {
+    let collapsed = readState();
+    if (collapsed == null) collapsed = side.classList.contains('collapsed');
+    apply(side, btn, collapsed);
+
+    btn.addEventListener('click', () => {
+      collapsed = !collapsed;
+      apply(side, btn, collapsed);
+      saveState(collapsed);
+    }, true);
+
+    // 键盘可用
+    btn.setAttribute('tabindex', '0');
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); }
+    });
+
+    // 监听外部切 class，自动同步按钮文案与存储
+    try {
+      const mo = new MutationObserver(() => {
+        const now = side.classList.contains('collapsed');
+        if (now !== collapsed) {
+          collapsed = now;
+          renderIcon(btn, collapsed);
+          saveState(collapsed);
+        }
+      });
+      mo.observe(side, { attributes:true, attributeFilter:['class'] });
+    } catch {}
+
+    // 首帧统一一次图标
+    renderIcon(btn, collapsed);
   }
 
-  let collapsed = loadState();
-  apply(collapsed);
-
-  btn.addEventListener('click', () => {
-    collapsed = !collapsed;
-    apply(collapsed);
-    saveState(collapsed);
-  });
-
-  function apply(flag) {
-    if (flag) {
-      sideBar.classList.add('collapsed');
-      appLayout.classList.add('sidebar-collapsed');
-      btn.textContent = '»';
-      btn.title = '展开侧栏';
-    } else {
-      sideBar.classList.remove('collapsed');
-      appLayout.classList.remove('sidebar-collapsed');
-      btn.textContent = '«';
-      btn.title = '折叠侧栏';
-    }
-  }
+  // 兜底路径：即使上面没有命中（例如 DOM 动态替换），也用事件委托保证可点击
+  document.addEventListener('click', (e) => {
+    const t = e.target && e.target.closest && e.target.closest('#sidebarToggle');
+    const s = document.getElementById('sidebar');
+    if (!t || !s) return;
+    const willCollapsed = !s.classList.contains('collapsed');
+    s.classList.toggle('collapsed', willCollapsed);
+    renderIcon(t, willCollapsed);
+    saveState(willCollapsed);
+  }, true);
 }
 
-function loadState() {
-  try { return localStorage.getItem(KEY) === '1'; } catch(_) { return false; }
+function apply(side, btn, flag) {
+  side.classList.toggle('collapsed', flag);
+  renderIcon(btn, flag);
+}
+
+function renderIcon(btn, collapsed) {
+  btn.textContent = collapsed ? '»' : '«';
+  btn.title = collapsed ? '展开侧栏' : '折叠侧栏';
+}
+
+function readState() {
+  try {
+    const v = localStorage.getItem(KEY);
+    if (v === '1') return true;
+    if (v === '0') return false;
+    return null;
+  } catch { return null; }
 }
 function saveState(v) {
-  try { localStorage.setItem(KEY, v ? '1' : '0'); } catch(_){}
+  try { localStorage.setItem(KEY, v ? '1' : '0'); } catch {}
 }
