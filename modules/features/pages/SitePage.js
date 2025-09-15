@@ -300,11 +300,25 @@ async function openVideoInSlot(devId, devNo) {
   const body = document.getElementById(`mediaBody${idx}`);
   const title = document.getElementById(`mediaTitle${idx}`);
   const vp = createVideoPreview({ objectFit:'fill' });
+
+  // 关键：视频容器自身也给到稳定的合成/不抢焦点
+  try {
+    vp.style.willChange = 'transform';
+    vp.style.transform = 'translateZ(0)';
+    vp.style.backfaceVisibility = 'hidden';
+    vp.setAttribute?.('tabindex', '-1');
+  } catch {}
+
   body.innerHTML = ''; body.appendChild(vp);
   body.setAttribute('data-free','0');
   title.textContent = `${devNo} 视频`;
   mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp;
-  try { await vp.play(SRS_FIXED_URL); } catch { eventBus.emit('toast:show', { type:'error', message:'拉流失败' }); closeSlot(idx); }
+
+  try { await vp.play(SRS_FIXED_URL); }
+  catch {
+    eventBus.emit('toast:show', { type:'error', message:'拉流失败' });
+    closeSlot(idx);
+  }
 }
 function openModeInSlot(devId, devNo, modeId) {
   const idx = findFreeSlot();
