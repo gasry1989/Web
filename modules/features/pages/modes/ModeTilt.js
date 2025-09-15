@@ -1,5 +1,6 @@
 /**
  * 倾角模式（modeId=1）— 只渲染，不发 WS/不定时
+ * 无设备时显示“无探头”
  */
 export function createModeTilt({ devId } = {}) {
   const TAG = `[ModeTilt#${devId ?? '-'}]`;
@@ -8,13 +9,14 @@ export function createModeTilt({ devId } = {}) {
 
   console.info(TAG, 'create');
 
-  let listEl = null;
+  let listEl = null, emptyEl = null;
   const tplReady = (async () => {
     const html = await fetch('/modules/features/pages/modes/mode-tilt.html', { cache: 'no-cache' }).then(r => r.text());
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const frag = doc.querySelector('#tpl-mode-tilt').content.cloneNode(true);
     root.appendChild(frag);
     listEl = root.getElementById('list');
+    emptyEl = root.getElementById('empty');
     console.info(TAG, 'template loaded');
   })();
 
@@ -35,14 +37,18 @@ export function createModeTilt({ devId } = {}) {
 
   let rows = [];
   function render(items) {
-    if (!listEl) return;
-    if (rows.length !== items.length) {
+    if (!listEl || !emptyEl) return;
+
+    const n = items.length|0;
+    emptyEl.style.display = n === 0 ? 'flex' : 'none';
+
+    if (rows.length !== n) {
       listEl.innerHTML = '';
       rows = items.map(() => makeRow());
       rows.forEach(r => listEl.appendChild(r.row));
       console.info(TAG, 'rows rebuilt:', rows.length);
     }
-    for (let i = 0; i < items.length; i++) {
+    for (let i = 0; i < n; i++) {
       const it = items[i], r = rows[i];
       r.name.textContent = it.name || `倾角${i + 1}#`;
       r.deg.textContent = (Number(it.deg) || 0).toFixed(1) + '°';
