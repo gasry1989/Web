@@ -3,6 +3,7 @@
  * 更新：
  *  - 暴露 whenReady()，模板加载完成后再对外可用
  *  - getFilterValues 做空节点兜底，避免空引用
+ *  - NEW: 自动监听筛选控件变更并重渲染；仅显示在线过滤在渲染期生效
  */
 export function createTreePanel() {
   const host = document.createElement('div');
@@ -11,12 +12,32 @@ export function createTreePanel() {
   const ready = deferred();
   let isReady = false;
 
+  // 统一处理筛选控件变更：自动重渲染并对外派发 filterchange
+  function onFilterChanged(e) {
+    const t = e && e.target;
+    if (!t || !t.id) return;
+    const ids = new Set(['fltDevType', 'fltDevMode', 'fltSearch', 'fltOnline']);
+    if (!ids.has(t.id)) return;
+    // 对外通知（保持外部可接管服务端筛选等逻辑）
+    host.dispatchEvent(new CustomEvent('filterchange', {
+      bubbles: true,
+      detail: getFilterValues()
+    }));
+    // 本地应用（至少“仅显示在线”要即时生效）
+    render();
+  }
+
   // 注入模板
   (async () => {
     try {
       const html = await fetch('/modules/features/pages/components/templates/tree-panel.html', { cache: 'no-cache' }).then(r => r.text());
       const frag = new DOMParser().parseFromString(html, 'text/html').querySelector('#tpl-tree-panel').content.cloneNode(true);
       root.appendChild(frag);
+
+      // 模板就绪后，绑定筛选变化监听（自动刷新）
+      root.addEventListener('input', onFilterChanged);
+      root.addEventListener('change', onFilterChanged);
+
       isReady = true;
       ready.resolve(true);
       host.dispatchEvent(new Event('ready'));
@@ -30,14 +51,24 @@ export function createTreePanel() {
   function render() {
     const treeEl = root.getElementById('tree');
     if (!treeEl) return; // 模板未就绪
+
+    // 从控件读取当前过滤状态（getFilterValues 已做兜底）
+    const { onlyOnline } = getFilterValues();
+
     const roots = buildForest(state.groupedDevices);
     const expandLevel = state.expandLevel || 2;
+
+    // 未分组设备过滤与计数
+    const ungrouped = onlyOnline
+      ? state.ungroupedDevices.filter(e => !!(e.devInfo && e.devInfo.onlineState))
+      : state.ungroupedDevices;
+
     const html = `
-      <div class="gdt">${roots.map(r => renderUserNodeHTML(r, 1, expandLevel)).join('')}</div>
+      <div class="gdt">${roots.map(r => renderUserNodeHTML(r, 1, expandLevel, onlyOnline)).join('')}</div>
       <div class="sec">
-        <div class="sec__title">未分组设备 (${state.ungroupedDevices.length})</div>
+        <div class="sec__title">未分组设备 (${ungrouped.length})</div>
         <div class="list">
-          ${state.ungroupedDevices.map(e => {
+          ${ungrouped.map(e => {
             const d = e.devInfo || {};
             const name = d.no || d.name || String(d.id || '');
             const cls = d.onlineState ? 'is-online' : 'is-offline';
@@ -88,23 +119,37 @@ export function createTreePanel() {
     map.forEach(n => { if (n.parentUserId == null || !map.has(n.parentUserId)) roots.push(n); });
     return roots;
   }
-  function renderUserNodeHTML(node, level, expandLevel) {
+
+  // 增加 onlyOnline 过滤渲染
+  function renderUserNodeHTML(node, level, expandLevel, onlyOnline = false) {
+    // 仅显示在线时：整节点离线且无在线后代，则不渲染
+    if (onlyOnline && !node.isOnline) return '';
+
     const name = (node.userName || '').trim();
-    const hasChildren = (node.children && node.children.length) || (node.deviceChildren && node.deviceChildren.length);
     const expanded = level <= expandLevel;
     const cls = node.isOnline ? 'is-online' : 'is-offline';
 
+    // 匿名用户节点（把子用户与设备平铺渲染）
     if (!name) {
-      return [
-        ...(node.children || []).map(c => renderUserNodeHTML(c, level, expandLevel)),
-        ...(node.deviceChildren || []).map(d => `
+      const childHTML = (node.children || []).map(c => renderUserNodeHTML(c, level, expandLevel, onlyOnline)).join('');
+      const devHTML = ((node.deviceChildren || []).filter(d => !onlyOnline || d.onlineState)).map(d => `
           <div class="node dev ${d.onlineState ? 'is-online' : 'is-offline'}" data-devid="${d.devId}">
             <span class="ic-dev"></span>
             <span class="title" title="${escapeHTML(d.devName)}">${escapeHTML(d.devName)}</span>
           </div>
-        `)
-      ].join('');
+        `).join('');
+      return childHTML + devHTML;
     }
+
+    // 先渲染子项，依据实际内容判断是否有子项（避免仅在线过滤后出现“空可展开”）
+    const childrenUsersHTML = (node.children || []).map(c => renderUserNodeHTML(c, level + 1, expandLevel, onlyOnline)).join('');
+    const devicesHTML = ((node.deviceChildren || []).filter(d => !onlyOnline || d.onlineState)).map(d => `
+          <div class="node dev ${d.onlineState ? 'is-online' : 'is-offline'}" data-devid="${d.devId}">
+            <span class="ic-dev"></span>
+            <span class="title" title="${escapeHTML(d.devName)}">${escapeHTML(d.devName)}</span>
+          </div>
+        `).join('');
+    const hasChildren = !!(childrenUsersHTML || devicesHTML);
 
     const head = `
       <div class="row ${cls}" data-node-type="user" data-user-id="${node.userId}">
@@ -114,13 +159,7 @@ export function createTreePanel() {
       </div>`;
     const children = hasChildren ? `
       <div class="children ${expanded ? '' : 'is-collapsed'}">
-        ${(node.children || []).map(c => renderUserNodeHTML(c, level + 1, expandLevel)).join('')}
-        ${(node.deviceChildren || []).map(d => `
-          <div class="node dev ${d.onlineState ? 'is-online' : 'is-offline'}" data-devid="${d.devId}">
-            <span class="ic-dev"></span>
-            <span class="title" title="${escapeHTML(d.devName)}">${escapeHTML(d.devName)}</span>
-          </div>
-        `).join('')}
+        ${childrenUsersHTML}${devicesHTML}
       </div>` : '';
     return `<div class="node user" data-user-id="${node.userId}">${head}${children}</div>`;
   }

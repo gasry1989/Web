@@ -55,6 +55,10 @@
       .toggle.is-empty { visibility:hidden; }
       .ic-user { display:none; }
 
+      /* 补回用户在线/离线配色（关键修复） */
+      .row.is-online .title { color: var(--on); }
+      .row.is-offline .title { color: var(--off); }
+
       /* 设备项 hover 效果，与未分组 chip 一致 */
       .node.dev {
         display:flex; align-items:center; gap:6px;
