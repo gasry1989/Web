@@ -101,7 +101,15 @@ export function mountSitePage() {
       mapView.addEventListener('openVideo', (e)=> openVideoInSlot(e.detail.devId, e.detail.devNo));
       mapView.addEventListener('openMode',  (e)=> openModeInSlot(e.detail.devId, e.detail.devNo, e.detail.modeId));
       mapView.addEventListener('refreshDevice', async (e)=>{ try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{} });
-
+      mapView.addEventListener('markerClick', async (e) => {
+        try {
+          const data = await apiDeviceInfo(e.detail.devId);
+          // 无定位的设备，信息窗会跟随地图中心显示
+          mapView.openDevice({ devInfo: data.devInfo, followCenterWhenNoLocation: true });
+        } catch (err) {
+          console.error('[Site] markerClick -> openDevice error', err);
+        }
+      });
       // 树点击 -> 信息窗
       tree.addEventListener('deviceclick', async (e)=>{
         try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{}
