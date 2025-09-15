@@ -1,25 +1,26 @@
 /**
- * MapView（iframe 隔离版）- 模板化
+ * MapView（iframe 隔离版，单文件，无模板依赖）
+ * 外部 API：mount/setMarkers/openDevice/setCenter/resize/destroy
+ * 外部事件：markerClick/openVideo/openMode/refreshDevice
  */
 export function createMapView({ amapKey, debug = true } = {}) {
   const host = document.createElement('div');
+  Object.assign(host.style, { display: 'block', width: '100%', height: '100%' });
   const shadow = host.attachShadow({ mode: 'open' });
 
-  let iframe, hint;
+  const style = document.createElement('style');
+  style.textContent = `
+  :host { all: initial; contain: content; display:block; width:100%; height:100%; }
+  *,*::before,*::after{ box-sizing:border-box; }
+  .wrap { width:100%; height:100%; position:relative; background:#0a0f14; }
+  iframe { position:absolute; inset:0; width:100%; height:100%; border:0; display:block; background:#0a0f14; }
+  .hint { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#9fb1bb; font-size:13px; pointer-events:none; }
+  `;
+  const wrap = document.createElement('div'); wrap.className = 'wrap';
+  const iframe = document.createElement('iframe');
+  const hint = document.createElement('div'); hint.className = 'hint'; hint.style.display = 'none';
+  wrap.append(iframe, hint); shadow.append(style, wrap);
 
-  (async () => {
-    const frag = await (await fetch('/modules/features/pages/components/templates/map-view.html', { cache: 'no-cache' })
-      .then(r=>r.text()).then(t=> new DOMParser().parseFromString(t, 'text/html')))
-      .querySelector('#tpl-map-view').content.cloneNode(true);
-    shadow.appendChild(frag);
-    iframe = shadow.getElementById('mvIframe');
-    hint = shadow.getElementById('mvHint');
-  })();
-
-  function showHint(t){ if(hint){ hint.textContent=t; hint.style.display='flex'; } }
-  function hideHint(){ if(hint) hint.style.display='none'; }
-
-  // 状态/缓存
   let ready = false;
   let destroyed = false;
   const queue = [];
@@ -28,6 +29,8 @@ export function createMapView({ amapKey, debug = true } = {}) {
 
   const log  = (...a)=>{ if (debug) try{ console.info('[MapView]', ...a); }catch{} };
   const warn = (...a)=>{ if (debug) try{ console.warn('[MapView]', ...a); }catch{} };
+  const showHint = (t)=>{ hint.textContent=t; hint.style.display='flex'; };
+  const hideHint = ()=>{ hint.style.display='none'; };
 
   function resolveKey() {
     if (amapKey && String(amapKey).trim()) return String(amapKey).trim();
@@ -40,7 +43,7 @@ export function createMapView({ amapKey, debug = true } = {}) {
 
   function send(msg) {
     if (destroyed) return;
-    if (ready && iframe?.contentWindow) {
+    if (ready && iframe.contentWindow) {
       iframe.contentWindow.postMessage(Object.assign({ __mv: true }, msg), '*');
     } else {
       queue.push(msg);
@@ -181,4 +184,18 @@ export function createMapView({ amapKey, debug = true } = {}) {
   }
 
   function setMarkers(list = []) { markersCache.length = 0; markersCache.push(...list); send({ t:'setMarkers', list }); }
-  function openDevice({ devInfo, followCenterWhenNoLocation = true })
+  function openDevice({ devInfo, followCenterWhenNoLocation = true }) { lastOpenDevice = { devInfo, followCenterWhenNoLocation }; send({ t:'openDevice', devInfo, followCenterWhenNoLocation }); }
+  function setCenter(lng, lat) { send({ t:'setCenter', lng, lat }); }
+  function resize() { send({ t:'resize' }); }
+  function destroy() { destroyed = true; try { window.removeEventListener('message', host.__onMsg); } catch {} try { host.remove(); } catch {} }
+
+  host.el = host;
+  host.mount = mount;
+  host.setMarkers = setMarkers;
+  host.openDevice = openDevice;
+  host.setCenter = setCenter;
+  host.resize = resize;
+  host.destroy = destroy;
+
+  return host;
+}

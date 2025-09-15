@@ -12,12 +12,13 @@ export async function showRoleMatrixPanel(roles) {
   const currentRoleId = authState.get().userInfo?.roleId;
 
   // 收集所有权限列
-  const permIdSet = new Map(); // permId -> name
+  const permIdSet = new Map();
   roles.forEach(r => (r.permissions || []).forEach(p => permIdSet.set(p.id, p.name)));
-  const permCols = Array.from(permIdSet.entries()); // [ [id,name], ... ]
+  const permCols = Array.from(permIdSet.entries());
 
   let frag;
   try {
+    // 确保 .html 后缀路径正确
     frag = await importTemplate('/modules/features/pages/modals/templates/role-matrix-panel.html', 'tpl-role-matrix-panel');
   } catch (e) {
     console.error('[RoleMatrixPanel] template load failed', e);
@@ -26,11 +27,11 @@ export async function showRoleMatrixPanel(roles) {
   const container = document.createElement('div');
   container.appendChild(frag);
 
-  // 填充表头
+  // 表头
   const headRow = container.querySelector('#rmHeadRow');
   headRow.innerHTML = `<th>角色</th>${permCols.map(([pid,name]) => `<th title="${escapeHTML(name)}">${escapeHTML(name)}</th>`).join('')}`;
 
-  // 填充表体
+  // 表体
   const body = container.querySelector('#rmBody');
   body.innerHTML = roles.map(r => renderRoleRow(r, permCols, currentRoleId)).join('');
 
@@ -51,7 +52,9 @@ export async function showRoleMatrixPanel(roles) {
             eventBus.emit('toast:show', { type:'success', message:'权限已更新' });
             close();
             modalRef = null;
-          } catch(e){}
+          } catch(e){
+            eventBus.emit('toast:show', { type:'error', message: e?.msg || '更新失败' });
+          }
         }
       }
     ]
@@ -61,7 +64,7 @@ export async function showRoleMatrixPanel(roles) {
 }
 
 function renderRoleRow(role, permCols, currentRoleId) {
-  const editable = role.roleId > currentRoleId && currentRoleId <= 1; // 仅管理员/测试人员，且只能编辑更大 roleId
+  const editable = role.roleId > currentRoleId && currentRoleId <= 1;
   return `
     <tr data-role="${role.roleId}">
       <td>${escapeHTML(role.roleName || '')}</td>

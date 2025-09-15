@@ -1,7 +1,9 @@
 /**
- * SitePage（装配）- 模板化
- * UI 结构与 CSS 放在 templates/site-page.html
- * 业务与交互逻辑保持不变
+ * SitePage（装配）
+ * 修复：
+ *  - 树组件宿主占满空间（滚动条可见）
+ *  - 分隔条更易拖动（命中 12px + 禁止选中文本）
+ *  - 视频打开失败增加超时并释放窗口
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './components/VideoPreview.js';
@@ -18,6 +20,8 @@ import { eventBus } from '@core/eventBus.js';
 import { importTemplate } from '@ui/templateLoader.js';
 
 const SRS_FIXED_URL = 'webrtc://media.szdght.com/1/camera_audio';
+const KEY_TREE_COLLAPSED = 'ui.sitepage.tree.collapsed';
+const PLAY_TIMEOUT_MS = 8000;
 
 let __prevHtmlOverflow = '';
 let __prevBodyOverflow = '';
@@ -54,24 +58,42 @@ export function mountSitePage() {
 
       const leftWrap = rootEl.querySelector('#spLeft');
       const splitter = rootEl.querySelector('#spSplitter');
-      const centerWrap = rootEl.querySelector('.sp-center');
+      const mapMount = rootEl.querySelector('#spMapMount');
+      const statusPanel = rootEl.querySelector('.sp-status');
+      const notifyPanel = rootEl.querySelector('.sp-notify');
+      const grid = rootEl.querySelector('#mediaGrid');
 
-      // 左树
+      // 树组件（关键：宿主参与伸展）
       tree = createTreePanel();
+      tree.style.flex = '1 1 auto';
+      tree.style.minHeight = '0';
       leftWrap.appendChild(tree);
 
-      // 监听树筛选变化
-      const onTreeFiltersChange = debounce(() => { reloadByFilters(leftWrap); }, 250);
+      // 折叠/展开：左上按钮 + 悬浮展开柄
+      const treeToggleBtn = rootEl.querySelector('#spTreeToggle');
+      const treeHandleBtn = rootEl.querySelector('#spTreeHandle');
+      const initCollapsed = loadCollapsed();
+      applyLeftCollapsed(initCollapsed);
+
+      treeToggleBtn.addEventListener('click', () => {
+        const next = !leftWrap.classList.contains('collapsed');
+        applyLeftCollapsed(next);
+        saveCollapsed(next);
+        try { mapView.resize(); } catch {}
+      });
+      treeHandleBtn.addEventListener('click', () => {
+        applyLeftCollapsed(false);
+        saveCollapsed(false);
+        try { mapView.resize(); } catch {}
+      });
+
+      // 树筛选变化
+      const onTreeFiltersChange = debounce(() => { reloadByFilters(); }, 250);
       ['filtersChange','filterchange','filterschange','filters:change'].forEach(evt => {
         try { tree.addEventListener(evt, onTreeFiltersChange); } catch {}
       });
       leftWrap.addEventListener('input', onTreeFiltersChange, true);
       leftWrap.addEventListener('change', onTreeFiltersChange, true);
-
-      // 上半：地图与侧栏
-      const mapMount = rootEl.querySelector('#spMapMount');
-      const statusPanel = rootEl.querySelector('.sp-status');
-      const notifyPanel = rootEl.querySelector('.sp-notify');
 
       // 地图
       mapView = createMapView({ amapKey: (ENV && ENV.AMAP_KEY) || (window.__AMAP_KEY || ''), debug: true });
@@ -87,14 +109,20 @@ export function mountSitePage() {
         try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{}
       });
 
-      // 媒体网格
-      const grid = rootEl.querySelector('#mediaGrid');
+      // 媒体关闭
       grid.addEventListener('click', (ev)=>{ const btn=ev.target.closest('[data-close]'); if(!btn) return; const idx=Number(btn.getAttribute('data-close')); closeSlot(idx); });
 
       // 分隔条
       initSplitter(leftWrap, splitter, ()=>{ try{ mapView.resize(); }catch{} });
 
-      // 首次加载
+      // 重置窗口为可用
+      for (let i=0;i<mediaSlots.length;i++) {
+        mediaSlots[i].type = null; mediaSlots[i].inst = null;
+        const body = document.getElementById(`mediaBody${i}`);
+        if (body) body.setAttribute('data-free','1');
+      }
+
+      // 初次数据
       bootstrapData(statusPanel.querySelector('#summaryChart'), notifyPanel.querySelector('#notifyList'));
     })
     .catch(err => console.error('[SitePage] template load failed', err));
@@ -110,7 +138,35 @@ export function unmountSitePage() {
   if (__prevMainStyle && main) { main.style.padding=__prevMainStyle.padding; main.style.overflow=__prevMainStyle.overflow; main.style.position=__prevMainStyle.position; main.style.height=__prevMainStyle.height; }
 }
 
-/* ---------------- 数据装配（同步 filters 到 siteState） ---------------- */
+/* ---------------- 折叠控制 ---------------- */
+function applyLeftCollapsed(flag){
+  const leftWrap = document.getElementById('spLeft');
+  const root = document.getElementById('spRoot');
+  const toggle = document.getElementById('spTreeToggle');
+  const handle = document.getElementById('spTreeHandle');
+  if (!leftWrap || !toggle || !root || !handle) return;
+
+  if (flag) {
+    if (!leftWrap.dataset.prevW) {
+      const w = leftWrap.getBoundingClientRect().width;
+      if (w > 0) leftWrap.dataset.prevW = w + 'px';
+    }
+    leftWrap.classList.add('collapsed');
+    root.classList.add('left-collapsed');
+    toggle.textContent = '»'; toggle.title = '展开树状栏';
+    handle.textContent = '»'; handle.title = '展开树状栏';
+  } else {
+    leftWrap.classList.remove('collapsed');
+    root.classList.remove('left-collapsed');
+    toggle.textContent = '«'; toggle.title = '折叠树状栏';
+    handle.textContent = '«'; handle.title = '折叠树状栏';
+    leftWrap.style.width = leftWrap.dataset.prevW || '320px';
+  }
+}
+function loadCollapsed(){ try{ return localStorage.getItem(KEY_TREE_COLLAPSED) === '1'; } catch { return false; } }
+function saveCollapsed(v){ try{ localStorage.setItem(KEY_TREE_COLLAPSED, v?'1':'0'); } catch {} }
+
+/* ---------------- 数据装配 ---------------- */
 async function bootstrapData(summaryEl, notifyEl) {
   try {
     const [types, modes, online, summary] = await Promise.all([ apiDevTypes(), apiDevModes(), apiOnlineList(), apiDeviceSummary() ]);
@@ -118,10 +174,7 @@ async function bootstrapData(summaryEl, notifyEl) {
     const filters = getFiltersFromTree();
     try { siteState.set({ filters }); } catch {}
 
-    console.info('[Site] filters:', JSON.stringify(filters));
-
     const [grouped, ungrouped] = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
-    console.info('[Site] device counts:', { grouped: grouped?.devList?.length||0, ungrouped: ungrouped?.devList?.length||0 });
 
     tree.setData({
       groupedDevices: grouped.devList || [],
@@ -140,30 +193,18 @@ async function bootstrapData(summaryEl, notifyEl) {
     console.error('[Site] bootstrapData error', e);
   }
 }
-
-// 根据当前树筛选刷新树与地图
-async function reloadByFilters(leftWrapRef) {
+async function reloadByFilters() {
   try {
     const filters = getFiltersFromTree();
     try { siteState.set({ filters }); } catch {}
-    console.info('[Site] filters:', JSON.stringify(filters));
-
     const [grouped, ungrouped] = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
-    console.info('[Site] device counts:', { grouped: grouped?.devList?.length||0, ungrouped: ungrouped?.devList?.length||0 });
-
-    tree.setData({
-      groupedDevices: grouped.devList || [],
-      ungroupedDevices: ungrouped.devList || [],
-      expandLevel: 2
-    });
-
+    tree.setData({ groupedDevices: grouped.devList || [], ungroupedDevices: ungrouped.devList || [], expandLevel: 2 });
     const all = [...(grouped.devList||[]), ...(ungrouped.devList||[])];
     mapView.setMarkers(all);
   } catch (e) {
     console.error('[Site] reloadByFilters error', e);
   }
 }
-
 function renderSummary(el, summary) {
   const list = summary?.stateList || [];
   el.innerHTML = list.map(item => {
@@ -188,10 +229,14 @@ function renderNotify(el, list) {
 function initSplitter(leftWrap, splitter, onDrag) {
   const MIN = 240, MAXVW = 50;
   splitter.addEventListener('mousedown', (e) => {
+    if (leftWrap.classList.contains('collapsed')) return; // 折叠时不允许拖拽
     const layoutRect = rootEl.getBoundingClientRect();
     const maxPx = Math.floor(window.innerWidth * (MAXVW / 100));
     const glass = document.createElement('div');
-    Object.assign(glass.style, { position:'fixed', inset:'0', cursor:'col-resize', zIndex:'2147483646', background:'transparent' });
+    Object.assign(glass.style, {
+      position:'fixed', inset:'0', cursor:'col-resize', zIndex:'2147483646',
+      background:'transparent', userSelect:'none'  // 防止选中文本卡顿
+    });
     document.body.appendChild(glass);
 
     const move = (ev) => {
@@ -221,7 +266,15 @@ function initSplitter(leftWrap, splitter, onDrag) {
 }
 
 /* ---------------- 媒体窗口 ---------------- */
-function findFreeSlot() { const s = mediaSlots.find(s => !s.type); return s ? s.idx : -1; }
+function findFreeSlot() {
+  for (let i = 0; i < mediaSlots.length; i++) {
+    const s = mediaSlots[i];
+    const body = document.getElementById(`mediaBody${i}`);
+    const isFreeDom = body && body.getAttribute('data-free') !== '0';
+    if (!s.type && isFreeDom) return i;
+  }
+  return -1;
+}
 async function openVideoInSlot(devId, devNo) {
   const idx = findFreeSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type:'error', message:'没有可用窗口' }); return; }
@@ -229,9 +282,16 @@ async function openVideoInSlot(devId, devNo) {
   const title = document.getElementById(`mediaTitle${idx}`);
   const vp = createVideoPreview({ objectFit:'fill' });
   body.innerHTML = ''; body.appendChild(vp);
+  body.setAttribute('data-free','0');
   title.textContent = `${devNo} 视频`;
   mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp;
-  try { await vp.play(SRS_FIXED_URL); } catch { eventBus.emit('toast:show', { type:'error', message:'拉流失败' }); closeSlot(idx); }
+
+  try {
+    await withTimeout(vp.play(SRS_FIXED_URL), PLAY_TIMEOUT_MS);
+  } catch {
+    eventBus.emit('toast:show', { type:'error', message:'视频打开失败' });
+    closeSlot(idx);
+  }
 }
 function openModeInSlot(devId, devNo, modeId) {
   const idx = findFreeSlot();
@@ -240,17 +300,31 @@ function openModeInSlot(devId, devNo, modeId) {
   const title = document.getElementById(`mediaTitle${idx}`);
   const mp = createModePreview({ modeId, devId });
   body.innerHTML = ''; body.appendChild(mp.el); mp.start();
+  body.setAttribute('data-free','0');
   title.textContent = `${devNo} 模式`;
   mediaSlots[idx].type = 'mode'; mediaSlots[idx].inst = mp;
 }
 function closeSlot(idx) {
   const s = mediaSlots[idx]; if (!s) return;
-  if (s.inst?.destroy) { try { s.inst.destroy(); } catch {} } s.inst=null; s.type=null;
-  const body = document.getElementById(`mediaBody${idx}`); const title = document.getElementById(`mediaTitle${idx}`);
-  if (body) body.innerHTML = '<div style="color:#567;font-size:12px;">在此显示视频流或模式</div>'; if (title) title.textContent = '空闲';
+  if (s.inst?.destroy) { try { s.inst.destroy(); } catch {} }
+  s.inst=null; s.type=null;
+  const body = document.getElementById(`mediaBody${idx}`);
+  const title = document.getElementById(`mediaTitle${idx}`);
+  if (body) {
+    body.innerHTML = '<div style="color:#567;font-size:12px;">在此显示视频流或模式</div>';
+    body.setAttribute('data-free','1');
+  }
+  if (title) title.textContent = '空闲';
 }
 
 /* ---------------- 工具 ---------------- */
+function withTimeout(promise, ms){
+  return new Promise((resolve, reject) => {
+    let timer = setTimeout(()=> reject(new Error('timeout')), ms);
+    promise.then(v => { clearTimeout(timer); resolve(v); })
+           .catch(e => { clearTimeout(timer); reject(e); });
+  });
+}
 function debounce(fn, wait=300) { let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; }
 function getFiltersFromTree(){
   const { devType, devMode, searchStr, onlyOnline } = tree.getFilterValues();

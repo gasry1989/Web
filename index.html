@@ -20,20 +20,94 @@
   }
   </script>
   <link rel="icon" href="./favicon.ico" />
-  <link rel="stylesheet" href="./styles/base.css" />
-  <link rel="stylesheet" href="./styles/theme.css" />
-  <link rel="stylesheet" href="./styles/layout.css" />
-  <link rel="stylesheet" href="./styles/components/table.css" />
-  <link rel="stylesheet" href="./styles/components/modal.css" />
-  <link rel="stylesheet" href="./styles/components/form.css" />
-  <link rel="stylesheet" href="./styles/components/video.css" />
-  <link rel="stylesheet" href="./styles/components/toast.css" />
-  <link rel="stylesheet" href="./styles/components/form-add-user.css" />
-  <link rel="stylesheet" href="./styles/components/password-modal.css" />
-  <link rel="stylesheet" href="styles/login.css">
-  <link rel="stylesheet" href="styles/users-page.css">
-  <link rel="stylesheet" href="styles/device-overview-fixed.css">
-  <link rel="stylesheet" href="styles/sidebar-toggle.css">
+  <!-- 全局最小样式（布局/头部/侧栏/Modal/Toast）。其余页面、弹窗、组件样式都在各自模板 HTML 内 -->
+  <style>
+    :root {
+      --color-bg:#0d1216;
+      --color-panel:#1c252c;
+      --color-border:#2e3a44;
+      --color-primary:#0b84d8;
+      --color-primary-hover:#1299f8;
+      --color-text:#eef3f5;
+      --color-text-dim:#95a2ad;
+      --radius:6px;
+    }
+    *{box-sizing:border-box;}
+    body{
+      margin:0;
+      background:var(--color-bg);
+      color:var(--color-text);
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+      -webkit-font-smoothing:antialiased;
+    }
+    a{color:var(--color-primary);text-decoration:none;}
+    a:hover{color:var(--color-primary-hover);}
+
+    /* 头部与三栏布局 */
+    .app-header {
+      height:48px; background:#182026; display:flex; align-items:center; justify-content:space-between;
+      padding:0 16px; border-bottom:1px solid #28323a; position:sticky; top:0; z-index:50;
+    }
+    .app-header__brand { font-weight:600; font-size:16px; }
+    .app-header__right { display:flex; align-items:center; gap:12px; }
+
+    .app-root { display:flex; min-height:calc(100vh - 48px); }
+    /* 兼容 #sidebar 与 #sideBar 两种 id */
+    #sidebar, #sideBar {
+      width:200px; background:#12181d; border-right:1px solid var(--color-border);
+      display:flex; flex-direction:column; position:relative; transition:width .2s ease;
+    }
+    #sidebar.collapsed, #sideBar.collapsed { width:48px; }
+    .sidebar__nav { padding:48px 0 8px; flex:1; overflow:auto; }
+    .sidebar__nav ul{list-style:none;margin:0;padding:0;}
+    .sidebar__nav a{display:block; padding:10px 16px; color:#9fb0bb; font-size:13px;}
+    .sidebar__nav a.active, .sidebar__nav a:hover { background:#1f2a32; color:#fff; }
+
+    .main-view{flex:1; padding:16px; overflow:auto;}
+
+    /* 侧栏折叠按钮（修复“只显示一半”） */
+    #sidebarToggle{
+      position:absolute; top:6px; right:6px; width:24px; height:24px; user-select:none;
+      background:#12181d; border:1px solid var(--color-border); border-radius:4px;
+      font-size:12px; line-height:24px; text-align:center; cursor:pointer; z-index:30;
+    }
+
+    /* 按钮基础 */
+    .btn{background:#24313a;color:#fff;border:1px solid var(--color-border);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;display:inline-flex;align-items:center;gap:4px;}
+    .btn:hover{background:#2f3e48;}
+    .btn-primary{background:var(--color-primary);border-color:var(--color-primary);}
+    .btn-primary:hover{background:var(--color-primary-hover);}
+    .btn-danger{background:#d64f4f;border-color:#d64f4f;}
+    .btn-xs{padding:4px 8px;font-size:12px;}
+    .btn-sm{padding:4px 10px;font-size:12px;}
+
+    /* Modal（供 @ui/modal.js 外层容器使用） */
+    .modal-overlay.locked{position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:1000;}
+    .modal{
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      background:#1f252b; color:#d8dce0; border-radius:6px; box-shadow:0 8px 32px rgba(0,0,0,.45);
+      display:flex; flex-direction:column; max-height:82vh; overflow:hidden; z-index:1001;
+    }
+    .modal__header{padding:14px 18px; font-weight:600; font-size:15px; border-bottom:1px solid #2c333a;}
+    .modal__body{padding:14px 18px 18px; overflow:auto; font-size:14px; line-height:1.5;}
+    .modal__footer{padding:12px 16px 14px; border-top:1px solid #2c333a; text-align:right; display:flex; gap:8px; justify-content:flex-end;}
+    .modal-open{overflow:hidden;}
+
+    /* Toast（供 @ui/toast.js 使用） */
+    #globalToastContainer{
+      position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:9999;
+      width:auto; max-width:60vw; display:flex; flex-direction:column; align-items:stretch; gap:8px; pointer-events:none;
+    }
+    .toast-item{background:rgba(40,45,52,.95); border:1px solid #38424d; border-radius:6px; color:#fff; font-size:14px; box-shadow:0 4px 14px -2px rgba(0,0,0,.45); overflow:hidden; pointer-events:auto;}
+    .toast-inner{display:flex; align-items:center; padding:10px 14px; gap:12px;}
+    .toast-msg{line-height:18px; word-break:break-all; flex:1;}
+    .toast-close{background:transparent; border:none; color:#9aa2ab; font-size:16px; cursor:pointer; padding:0 4px; line-height:1;}
+    .toast-close:hover{color:#fff;}
+    .toast-success{border-color:#1d6d3a; background:rgba(27,95,50,.95);}
+    .toast-error{border-color:#7d2b2b; background:rgba(120,40,40,.95);}
+    .toast-warn{border-color:#806010; background:rgba(120,88,20,.95);}
+    .toast-info{border-color:#2e4d7f; background:rgba(40,60,95,.95);}
+  </style>
 </head>
 <body>
   <header class="app-header">

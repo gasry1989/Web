@@ -2,33 +2,44 @@
 <html><head><meta charset="utf-8"></head><body>
   <template id="tpl-edit-user-modal">
     <style>
-      /* Scoped: EditUserModal */
       .edit-user-modal.fixed-size-modal,
       .edit-user-modal.fixed-size-modal .modal-body,
       .edit-user-modal.fixed-size-modal .modal-form { height:100%; overflow:hidden; box-sizing:border-box; }
       .edit-user-modal .user-form.no-scroll { display:flex; flex-direction:column; height:100%; overflow:hidden; padding:10px 14px 12px; box-sizing:border-box; gap:10px; }
-      .edit-user-modal .content-scroll-lock { flex:1; display:flex; flex-direction:column; gap:10px; min-height:0; overflow:hidden; }
+      .edit-user-modal .content-scroll-lock { flex:1; display:flex; flex-direction:column; gap:10px; min-height:0; overflow:auto; }
+
       .edit-user-modal .form-row { display:flex; align-items:center; gap:14px; min-height:40px; }
       .edit-user-modal .form-row .form-label { flex:0 0 110px; text-align:left; font-size:13px; color:#c8d0d7; line-height:1.2; }
       .edit-user-modal .form-row .form-field { flex:1; display:flex; align-items:center; gap:8px; min-width:0; }
-      .edit-user-modal input, .edit-user-modal select, .edit-user-modal textarea { width:100%; box-sizing:border-box; }
-      .edit-user-modal select { min-height:32px; }
+
+      /* 统一深色输入/下拉样式 */
+      .edit-user-modal input, .edit-user-modal select, .edit-user-modal textarea {
+        width:100%; box-sizing:border-box; background:#161b21; border:1px solid #2c343c; border-radius:4px; color:#fff;
+        padding:6px 10px; font-size:13px; outline:none; transition:border-color .15s;
+      }
+      .edit-user-modal select { min-height:32px; appearance:none; background-image:linear-gradient(45deg,transparent 50%,#9fb1bb 50%),linear-gradient(135deg,#9fb1bb 50%,transparent 50%);
+        background-position: calc(100% - 18px) calc(50% - 3px), calc(100% - 12px) calc(50% - 3px);
+        background-size:6px 6px, 6px 6px; background-repeat:no-repeat; padding-right:28px;
+      }
+      .edit-user-modal input:focus, .edit-user-modal select:focus, .edit-user-modal textarea:focus { border-color:#3d78d4; }
+      .edit-user-modal input:disabled, .edit-user-modal select:disabled, .edit-user-modal textarea:disabled { opacity:.7; cursor:not-allowed; }
+
       .edit-user-modal .region-group { display:flex; gap:12px; width:100%; }
       .edit-user-modal .region-group select { flex:1; }
       .edit-user-modal .form-row-remark { display:flex; flex-direction:column; gap:6px; }
       .edit-user-modal .form-row-remark .form-label { text-align:left; font-size:13px; color:#c8d0d7; }
+
       .edit-user-modal textarea { resize:vertical; overflow-y:auto; overflow-x:hidden; min-height:110px; max-height:240px; line-height:1.4; font-size:13px; }
+
       .edit-user-modal .parent-search-list { margin-top:6px; max-height:180px; overflow-y:auto; overflow-x:hidden; border:1px solid #2d373f; border-radius:4px; background:#141c23; font-size:13px; }
-      .edit-user-modal .parent-search-list::-webkit-scrollbar { width:8px; }
-      .edit-user-modal .parent-search-list::-webkit-scrollbar-thumb { background:#2c3943; border-radius:4px; }
-      .edit-user-modal .parent-item { padding:6px 10px; cursor:pointer; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; border-bottom:1px solid #1f252b; }
-      .edit-user-modal .parent-item:last-child { border-bottom:none; }
-      .edit-user-modal .parent-item:hover { background:#1f2b34; color:#fff; }
-      .edit-user-modal .parent-item.empty { cursor:default; color:#6c7680; }
+      .edit-user-modal .parent-search-list { scrollbar-width:thin; scrollbar-color:#33424d #141b20; }
+      .edit-user-modal .parent-search-list::-webkit-scrollbar { width:8px; height:8px; }
+      .edit-user-modal .parent-search-list::-webkit-scrollbar-track { background:#141b20; }
+      .edit-user-modal .parent-search-list::-webkit-scrollbar-thumb { background:#33424d; border-radius:4px; }
+      .edit-user-modal .parent-search-list::-webkit-scrollbar-thumb:hover { background:#415464; }
+
       .edit-user-modal .hint { font-size:12px; color:#7d8891; margin-top:4px; }
       .edit-user-modal .bottom-actions { display:flex; justify-content:flex-end; gap:12px; padding-top:8px; border-top:1px solid #1f252b; flex-shrink:0; }
-      .edit-user-modal * { max-width:100%; box-sizing:border-box; }
-      .edit-user-modal { overflow-x:hidden; }
       .btn.btn-primary { background:#0b84d8; border-color:#0b84d8; color:#fff; }
     </style>
 

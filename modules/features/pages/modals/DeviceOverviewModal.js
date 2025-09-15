@@ -1,5 +1,7 @@
 /**
- * 设备概览 - 模板化
+ * 设备概览 - 修复滚动条与无谓空白
+ * - Modal 固定自适应高度（height: ~78vh），内部 dev-table-area 承担滚动
+ * - 滚动条风格与树状栏一致（见模板 CSS）
  */
 import { createModal, getModal } from '@ui/modal.js';
 import { apiDeviceList } from '@api/deviceApi.js';
@@ -51,11 +53,12 @@ export async function showDeviceOverviewModal(opt={}) {
   const headRow = content.querySelector('#devHeadRow');
   headRow.innerHTML = COL_MAP.map(c=>`<th>${c.title}</th>`).join('');
 
-  const width = Math.min(Math.floor(window.innerWidth * 0.8), MAX_WIDTH);
+  const { width, height } = calcModalSize();
   modalRef = createModal({
     id:'deviceOverviewModal',
     title:'设备概览',
     width,
+    height,            // 关键：固定一个可视高度，内部区域滚动
     content,
     footerButtons:[{
       text:'关闭',
@@ -80,13 +83,22 @@ function bindEvents() {
 function onResize() {
   const m = getModal('deviceOverviewModal');
   if (!m || !m.wrap) return;
-  const width = Math.min(Math.floor(window.innerWidth * 0.8), MAX_WIDTH);
+  const { width, height } = calcModalSize();
   m.wrap.style.width = width + 'px';
+  m.wrap.style.height = height + 'px';
+}
+
+function calcModalSize() {
+  const width = Math.min(Math.floor(window.innerWidth * 0.8), MAX_WIDTH);
+  // 78vh 大约等于视口高度的 78%，预留头部/底部不遮挡
+  const height = Math.max(460, Math.floor(window.innerHeight * 0.78));
+  return { width, height };
 }
 
 function loadPage(pageIndex, { silentLoading }) {
   if (state.loading) return;
   state.loading = true;
+
   const mask = modalRef?.body.querySelector('#devLoadingMask');
   if (mask && !silentLoading) mask.style.display = 'flex';
   if (silentLoading && modalRef) {

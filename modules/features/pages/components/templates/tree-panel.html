@@ -2,19 +2,32 @@
 <html><head><meta charset="utf-8"></head><body>
   <template id="tpl-tree-panel">
     <style>
-      :host { all: initial; contain: content; }
+      :host { all: initial; contain: content; display:block; width:100%; height:100%; }
       *, *::before, *::after { box-sizing: border-box; }
-      .wrap { --panel-bg:#0f1720; --panel-line:rgba(255,255,255,.08);
+      .wrap {
+        --panel-bg:#0f1720; --panel-line:rgba(255,255,255,.08);
         --text:#cfd8dc; --text-dim:#9fb1bb; --on:#ffffff; --off:#7a8a93;
-        --dev-on-bg:linear-gradient(135deg,#5aa0ff,#3d89ff); --dev-off-bg:#5b6b78;
-        height:100%; display:flex; flex-direction:column; background:var(--panel-bg); color:var(--text); }
+        --dev-on-bg:linear-gradient(135deg,#5aa0ff,#3d89ff);
+        --dev-off-bg:#5b6b78;
+        height:100%; display:flex; flex-direction:column; background:var(--panel-bg); color:var(--text);
+      }
       .filters { padding:8px 10px; border-bottom:1px solid var(--panel-line); }
       .filters label { color:var(--text-dim); display:flex; align-items:center; gap:6px; }
       .filters .row { display:grid; grid-template-columns:1fr; gap:6px; }
-      .filters input[type="text"], .filters select { width:100%; background:#0b121a; color:var(--text); border:1px solid var(--panel-line); border-radius:4px; padding:4px 6px; }
+      .filters input[type="text"], .filters select {
+        width:100%; background:#0b121a; color:var(--text); border:1px solid var(--panel-line); border-radius:4px; padding:4px 6px;
+      }
       .filters .chk { display:flex; align-items:center; gap:6px; white-space:nowrap; justify-content:flex-start; }
       .filters .btn { padding:4px 10px; border:1px solid var(--panel-line); background:#122133; color:#cfd8dc; border-radius:4px; cursor:pointer; }
-      .tree { flex:1 1 auto; overflow:auto; }
+
+      .tree { flex:1 1 auto; overflow:auto; min-height:0; }
+      /* 统一的滚动条样式（树状栏） */
+      .tree { scrollbar-width:thin; scrollbar-color:#33424d #141b20; }
+      .tree::-webkit-scrollbar { width:8px; height:8px; }
+      .tree::-webkit-scrollbar-track { background:#141b20; }
+      .tree::-webkit-scrollbar-thumb { background:#33424d; border-radius:4px; }
+      .tree::-webkit-scrollbar-thumb:hover { background:#415464; }
+
       .gdt { padding:6px 8px; min-width:100%; width:max-content; }
       .node + .node { margin-top:6px; }
       .row { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; cursor:pointer; user-select:none; }
@@ -26,12 +39,15 @@
       .title { white-space:nowrap; }
       .row.is-online .title { color:var(--on); }
       .row.is-offline .title { color:var(--off); }
+
       .children { margin-left:18px; border-left:1px dashed rgba(255,255,255,.12); padding-left:10px; }
       .children.is-collapsed { display:none; }
+
       .node.dev.is-online .title { color:var(--on); }
       .node.dev.is-offline .title { color:var(--off); }
       .node.dev.is-online .ic-dev { background:var(--dev-on-bg); }
       .node.dev.is-offline .ic-dev { background:var(--dev-off-bg); }
+
       .sec { margin:8px 8px 12px; }
       .sec__title { font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e; border-radius:4px; border:1px solid rgba(255,255,255,.08); }
       .list { padding:6px 8px; display:flex; flex-direction:column; gap:4px; }
