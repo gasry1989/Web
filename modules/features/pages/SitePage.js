@@ -2,9 +2,10 @@
  * SitePage（装配）
  * 变更要点：
  * - 打开模式时标题包含具体模式名（如“9527 音视频模式”）
+ * - 同一设备的同一模式只允许打开一个实例；再次打开直接 toast 提示“模式已打开”
  * - window.pushModeData({ devId, modeId, data }) 路由到对应窗口 setData
  * - 内置 300ms 本地 MOCK（可用 ?mock=0 关闭），支持设备数量动态变化
- * - 地图信息窗“无经纬度 -> 上次位置 -> 首次居中”的逻辑已在 map-view-frame.html 内处理
+ * - 地图信息窗“无经纬度 -> 上次位置 -> 首次居中”的逻辑在 map-view-frame.html 内处理
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './modes/VideoPreview.js';
@@ -163,7 +164,7 @@ export function mountSitePage() {
       window.pushModeData = function pushModeData({ devId, modeId, data }) {
         try {
           const s = mediaSlots.find(x => x.type==='mode' && String(x.devId)===String(devId) && Number(x.modeId)===Number(modeId));
-          if (!s || !s.inst || typeof s.inst.setData!=='function') return;
+        if (!s || !s.inst || typeof s.inst.setData!=='function') return;
           s.inst.setData(data);
         } catch (e) {
           console.warn('[Site] pushModeData error', e);
@@ -334,6 +335,9 @@ function findFreeSlot() {
   }
   return -1;
 }
+function isModeOpened(devId, modeId){
+  return mediaSlots.some(s => s.type==='mode' && String(s.devId)===String(devId) && Number(s.modeId)===Number(modeId));
+}
 async function openVideoInSlot(devId, devNo) {
   const idx = findFreeSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type:'error', message:'没有可用窗口' }); return; }
@@ -361,13 +365,21 @@ async function openVideoInSlot(devId, devNo) {
   }
 }
 function openModeInSlot(devId, devNo, modeId) {
+  const mid = Number(modeId);
+
+  // 同设备同模式只能打开一次
+  if (isModeOpened(devId, mid)) {
+    const msg = `${devNo ? devNo + ' ' : ''}${MODE_NAME(mid)}已打开`;
+    eventBus.emit('toast:show', { type:'info', message: msg });
+    return;
+  }
+
   const idx = findFreeSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type:'error', message:'没有可用窗口' }); return; }
   const body = document.getElementById(`mediaBody${idx}`);
   const title = document.getElementById(`mediaTitle${idx}`);
 
   let mp = null;
-  const mid = Number(modeId);
   if (mid === 1) mp = createModeTilt({ devId });
   else if (mid === 2) mp = createModeDispTilt({ devId });
   else if (mid === 3) mp = createModeAudio({ devId });
