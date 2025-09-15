@@ -1,9 +1,7 @@
 /**
  * MapView（基于 iframe 的地图容器）
- * 变更：不再用 URL 传 Key，改为在 iframe load 后用 postMessage 发送 { t:'init', key, debug }
- * 统一约定：Key 仅在 /config/env.js 维护一次，由父页面传入此组件。
  * 外部 API：mount/setMarkers/openDevice/setCenter/resize/destroy
- * 外部事件：markerClick/openVideo/openMode/refreshDevice
+ * 外部事件：markerClick/openVideo/openMode/refreshDevice/openDetail
  */
 export function createMapView({ amapKey, debug = true } = {}) {
   const host = document.createElement('div');
@@ -34,7 +32,6 @@ export function createMapView({ amapKey, debug = true } = {}) {
   const showHint = (t)=>{ hint.textContent=t; hint.style.display='flex'; };
   const hideHint = ()=>{ hint.style.display='none'; };
 
-  // 仅作为兜底：优先使用入参，其次 window.__AMAP_KEY 和 <meta>
   function resolveKey() {
     if (amapKey && String(amapKey).trim()) return String(amapKey).trim();
     try { if (window.__AMAP_KEY) return String(window.__AMAP_KEY).trim(); } catch {}
@@ -62,7 +59,6 @@ export function createMapView({ amapKey, debug = true } = {}) {
     const key = resolveKey();
     if (!key) { showHint('缺少高德 Key（AMAP_KEY）'); warn('缺少高德 Key（AMAP_KEY）'); }
 
-    // 加载独立的 iframe 页面（不带任何 key 参数）
     iframe.src = `/modules/features/pages/components/templates/map-view-frame.html`;
     log('mount begin, size=', host.getBoundingClientRect());
 
@@ -83,13 +79,19 @@ export function createMapView({ amapKey, debug = true } = {}) {
           host.dispatchEvent(new CustomEvent('markerClick', { bubbles:true, detail:{ devId: data.devId } }));
           break;
         case 'openVideo':
-          host.dispatchEvent(new CustomEvent('openVideo', { bubbles:true, detail:{ devId: data.devId, devNo: data.devNo } }));
+          host.dispatchEvent(new CustomEvent('openVideo', {
+            bubbles:true,
+            detail:{ devId: data.devId, devNo: data.devNo, cameraIndex: data.cameraIndex, streamType: data.streamType }
+          }));
           break;
         case 'openMode':
           host.dispatchEvent(new CustomEvent('openMode', { bubbles:true, detail:{ devId: data.devId, devNo: data.devNo, modeId: data.modeId } }));
           break;
         case 'refreshDevice':
           host.dispatchEvent(new CustomEvent('refreshDevice', { bubbles:true, detail:{ devId: data.devId } }));
+          break;
+        case 'openDetail':
+          host.dispatchEvent(new CustomEvent('openDetail', { bubbles:true, detail:{ devId: data.devId, devNo: data.devNo } }));
           break;
         case 'error':
           warn(data.message); showHint(data.message || '地图加载失败');
@@ -102,7 +104,6 @@ export function createMapView({ amapKey, debug = true } = {}) {
     window.addEventListener('message', onMsg);
     host.__onMsg = onMsg;
 
-    // 等 iframe 加载完成后，再把 key 通过 postMessage 传进去（父页面只配置一次）
     iframe.addEventListener('load', () => {
       try {
         iframe.contentWindow?.postMessage({ __mv:true, t:'init', key, debug: !!debug }, '*');
@@ -114,7 +115,7 @@ export function createMapView({ amapKey, debug = true } = {}) {
   function openDevice({ devInfo, followCenterWhenNoLocation = true }) { lastOpenDevice = { devInfo, followCenterWhenNoLocation }; postToFrame({ t:'openDevice', devInfo, followCenterWhenNoLocation }); }
   function setCenter(lng, lat) { postToFrame({ t:'setCenter', lng, lat }); }
   function resize() { postToFrame({ t:'resize' }); }
-  function destroy() { destroyed = true; try { window.removeEventListener('message', host.__onMsg); } catch {} try { host.remove(); } catch {} }
+  function destroy() { try { window.removeEventListener('message', host.__onMsg); } catch {} try { host.remove(); } catch {} }
 
   host.mount = mount;
   host.setMarkers = setMarkers;

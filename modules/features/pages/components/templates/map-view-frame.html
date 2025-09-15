@@ -8,7 +8,6 @@
     html,body,#map{height:100%;margin:0;padding:0;background:#0a0f14}
     *{box-sizing:border-box}
 
-    /* 关键修复：禁用地图区域的文本选择和点击高亮，避免出现蓝色选区 */
     html, body, #map,
     .amap-canvas, .amap-layer, .amap-marker, .amap-marker-label,
     .amap-overlay-text, .amap-info, .ov-wrap, .ov-wrap * {
@@ -18,18 +17,62 @@
       -webkit-touch-callout: none;
       -webkit-tap-highlight-color: transparent;
     }
-    /* 图片与标注不允许被拖动成选区影像 */
     img, .amap-marker img { -webkit-user-drag: none; user-drag: none; }
 
-    /* 信息窗固定尺寸：宽度固定，高度在打开后锁定 */
-    .ov-wrap{width:380px;background:#111c28;color:#cfd8dc;border:1px solid rgba(255,255,255,.12);border-radius:6px;box-shadow:0 8px 22px rgba(0,0,0,.45);overflow:hidden;}
-    .ov-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);font-weight:600;}
-    .ov-bd{padding:10px 12px;font-size:12px;line-height:1.7;}
-    .ov-actions{padding:0 12px 12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
-    .btn{padding:4px 8px;background:#1f497d;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;}
-    select{background:#15202a;color:#e6f0ff;border:1px solid rgba(255,255,255,.15);border-radius:4px;padding:3px 6px;}
-    .ov-close{background:transparent;border:none;color:#ccd;cursor:pointer;}
+    .ov-wrap{width:420px;background:#111c28;color:#cfd8dc;border:1px solid rgba(255,255,255,.12);border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.5);overflow:hidden;}
+    /* 两行头部布局：左侧大图标，右侧两行内容 */
+    .ov-hd{
+      display:grid;
+      grid-template-columns: 56px 1fr;
+      grid-template-rows:auto auto;
+      gap:8px 10px;
+      padding:10px 12px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      align-items:center;
+    }
+    .ov-ic{
+      grid-column:1/2; grid-row:1/3;
+      width:56px; height:56px; border-radius:10px;
+      background:#17324a; background-size:70% 70%; background-position:center; background-repeat:no-repeat;
+      border:1px solid rgba(255,255,255,.1);
+    }
+    .ov-row1{ grid-column:2/3; grid-row:1/2; display:flex; align-items:center; gap:10px; min-width:0; }
+    .ov-row2{ grid-column:2/3; grid-row:2/3; display:flex; align-items:center; gap:10px; min-width:0; }
+
+    .ov-name{font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto;}
+    .ov-status{font-size:12px; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.15);}
+    .st-online{background:#11331a;color:#7ef58b;border-color:rgba(126,245,139,.25);}
+    .st-offline{background:#2a2f36;color:#9aa3ab;border-color:rgba(255,255,255,.12);font-size:11px;}
+    .ov-close{background:transparent;border:none;color:#ccd;cursor:pointer;font-size:16px;line-height:1;}
     .ov-close:hover{color:#fff;}
+
+    .ov-bd{padding:10px 12px;font-size:12px;line-height:1.8;}
+    .ov-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0;}
+    .ov-row label{color:#9fb1bb;white-space:nowrap;min-width:64px;}
+    .ov-row .mono{font-family:ui-monospace,SFMono-Regular,Consolas,Monaco,monospace;}
+
+    .btn{padding:4px 8px;background:#1f497d;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;}
+    .btn:disabled{opacity:.6;cursor:not-allowed;}
+    .btn-icon{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:4px;background:#203246;border:1px solid rgba(255,255,255,.15);cursor:pointer;}
+    .btn-icon svg{width:16px;height:16px;fill:#e6f0ff;}
+    select{background:#15202a;color:#e6f0ff;border:1px solid rgba(255,255,255,.15);border-radius:4px;padding:3px 6px;}
+
+    /* 电池造型（条形） */
+    .ov-batt{position:relative;flex:0 0 auto;width:62px;height:16px;border:1px solid rgba(255,255,255,.2);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;background:#0f1622;overflow:hidden;}
+    .ov-batt::after{content:'';position:absolute;right:-5px;top:50%;transform:translateY(-50%);width:4px;height:8px;border:1px solid rgba(255,255,255,.2);border-left:none;border-radius:0 2px 2px 0;background:#0f1622;}
+    .ov-batt .batt-fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:2px;}
+    .ov-batt .batt-txt{position:relative;font-size:11px;color:#e8f2ff;}
+    .batt-ok .batt-fill{background:#2dbb69;}
+    .batt-mid .batt-fill{background:#d7a43a;}
+    .batt-low .batt-fill{background:#d45b5b;}
+
+    /* 设备类型图标占位（可替换为真实图片） */
+    .dt-1{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%2322463e"/><circle cx="32" cy="32" r="14" fill="%2396f7d2"/></svg>');}
+    .dt-2{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%23223a69"/><rect x="16" y="18" width="32" height="22" rx="3" fill="%2390c2ff"/><circle cx="32" cy="46" r="5" fill="%23b5d9ff"/></svg>');}
+    .dt-3{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%233b264f"/><path d="M18 46l14-28 14 28z" fill="%23d6b6ff"/></svg>');}
+    .dt-4{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%23404a57"/><path d="M20 20h24v24H20z" fill="%23cfd8dc"/></svg>');}
+
+    .addr-text{color:#e6f0ff;}
   </style>
 </head>
 <body>
@@ -43,7 +86,7 @@
       var warn=function(){ if(debug) try{ console.warn.apply(console, ["[MapView-IFRAME]"].concat([].slice.call(arguments))); }catch(e){} };
       var post=function(msg){ try{ parent.postMessage(Object.assign({__mv:true},msg),"*"); }catch(e){} };
 
-      var map=null,markers=[],infoWindow=null,followCenter=false,mounted=false,currentDevInfo=null;
+      var map=null,markers=[],infoWindow=null,followCenter=false,mounted=false,currentDevInfo=null, geocoder=null;
 
       function ensureAMap(cb){
         if(!AMAP_KEY){ post({t:"error",message:"缺少高德 Key（AMAP_KEY）"}); return; }
@@ -54,6 +97,14 @@
         s.onerror=function(){ post({t:"error",message:"高德 SDK 加载失败"}); };
         document.head.appendChild(s);
       }
+      function ensureGeocoder(cb) {
+        try {
+          if (geocoder) { cb && cb(); return; }
+          if (!window.AMap) return;
+          if (AMap.Geocoder) { geocoder = new AMap.Geocoder(); cb && cb(); }
+          else if (AMap.plugin) { AMap.plugin('AMap.Geocoder', function(){ geocoder = new AMap.Geocoder(); cb && cb(); }); }
+        } catch(e) { warn('geocoder init error', e); }
+      }
 
       function init(){
         try{
@@ -62,7 +113,6 @@
           mounted=true;
           map.on && map.on("complete", function(){ post({t:"ready"}); log("map complete"); });
 
-          /* 关键修复：任何交互都清除浏览器选区，避免蓝色选区残留 */
           var clearSel=function(){ try{ var s=window.getSelection && window.getSelection(); if(s&&s.removeAllRanges) s.removeAllRanges(); }catch(e){} };
           map.on && map.on("click", clearSel);
           map.on && map.on("mousemove", clearSel);
@@ -70,9 +120,7 @@
           map.on && map.on("zoomstart", clearSel);
           document.addEventListener("mouseup", clearSel, true);
 
-          map.on && map.on("mapmove", function(){
-            if(followCenter&&infoWindow){ try{ infoWindow.setPosition(map.getCenter()); }catch(e){} }
-          });
+          map.on && map.on("mapmove", function(){ if(followCenter&&infoWindow){ try{ infoWindow.setPosition(map.getCenter()); }catch(e){} } });
         }catch(e){
           warn("init error",e); post({t:"error",message:"地图初始化失败"});
         }
@@ -86,12 +134,7 @@
         (list||[]).forEach(function(e){
           var d=e.devInfo||e;
           if(!d||!d.lastLocation||d.lastLocation.lng==null||d.lastLocation.lat==null) return;
-          var mk=new AMap.Marker({
-            position:[d.lastLocation.lng,d.lastLocation.lat],
-            title:d.no,
-            draggable:false,  // 显式不可拖拽
-            bubble:true
-          });
+          var mk=new AMap.Marker({ position:[d.lastLocation.lng,d.lastLocation.lat], title:d.no, draggable:false, bubble:true });
           mk.on("click", function(){ post({t:"markerClick", devId:d.id}); });
           mk.setMap(map); markers.push(mk); cnt++;
         });
@@ -106,6 +149,27 @@
         }catch(e){}
       }
 
+      function fmtBattery(v){
+        var n = Number.isFinite(v)? Math.max(0, Math.min(100, Math.floor(v))) : 0;
+        var cls = n >= 50 ? 'batt-ok' : (n >= 20 ? 'batt-mid' : 'batt-low');
+        return { n:n, text: n + '%', cls };
+      }
+      function ori(bTrue, posChar){ return bTrue===false ? (posChar==='N'?'S':'W') : posChar; }
+      function fmtCoord(lat,lng,isNorth,isEast){
+        var latS = (Math.abs(lat).toFixed(6)) + '°';
+        var lngS = (Math.abs(lng).toFixed(6)) + '°';
+        return ori(isNorth,'N') + ' ' + latS + ', ' + ori(isEast,'E') + ' ' + lngS;
+      }
+      function typeClassOf(dev){
+        var t = dev && (dev.type!=null ? String(dev.type) : (dev.typeName||''));
+        if (/1$/.test(t)) return 'dt-1';
+        if (/2$/.test(t)) return 'dt-2';
+        if (/3$/.test(t)) return 'dt-3';
+        if (/4$/.test(t)) return 'dt-4';
+        var s=0; String(t).split('').forEach(function(c){ s=(s*131 + c.charCodeAt(0))>>>0; });
+        return 'dt-' + (s%4+1);
+      }
+
       function openDevice(devInfo, followCenterWhenNoLocation){
         if(!mounted) return;
         currentDevInfo = devInfo || {};
@@ -118,61 +182,151 @@
           followCenter=!!followCenterWhenNoLocation;
         }
 
-        var options = (currentDevInfo.modeList||[]).map(function(m){
-          var id = (m && m.modeId!=null) ? m.modeId : "";
-          var name = (m && (m.modeName||m.name)) ? (m.modeName||m.name) : "";
-          return '<option value="'+ String(id) +'">'+ String(name) +'</option>';
-        }).join('');
+        var battery = fmtBattery(currentDevInfo.battery);
+        var statusCls = currentDevInfo.onlineState ? 'st-online' : 'st-offline';
+        var statusText = currentDevInfo.onlineState ? '在线' : '离线';
+        var tClass = typeClassOf(currentDevInfo);
 
-        var posText = currentDevInfo.lastLocation
-          ? (currentDevInfo.lastLocation.lat + "," + currentDevInfo.lastLocation.lng + (currentDevInfo.lastLocation.height!=null?(" 高度:"+currentDevInfo.lastLocation.height+"m"):""))
+        var hasLL = !!(currentDevInfo.lastLocation && currentDevInfo.lastLocation.lng!=null && currentDevInfo.lastLocation.lat!=null);
+        var posText = hasLL
+          ? (fmtCoord(currentDevInfo.lastLocation.lat, currentDevInfo.lastLocation.lng, currentDevInfo.lastLocation.isNorth, currentDevInfo.lastLocation.isEast)
+             + (currentDevInfo.lastLocation.height!=null? ('   ' + Number(currentDevInfo.lastLocation.height) + 'm'):''))
           : "无定位数据";
         var timeText = currentDevInfo.lastLocation ? new Date(currentDevInfo.lastLocation.time).toLocaleString() : "";
-        var onlineTag = currentDevInfo.onlineState
-          ? '<span style="font-size:12px;color:#7ef58b;margin-left:6px;">在线</span>'
-          : '<span style="font-size:12px;color:#99a;margin-left:6px;">离线</span>';
+        var speedText = currentDevInfo.lastLocation ? ((currentDevInfo.lastLocation.speed||0) + ' km/h') : '';
+
+        var modeList = Array.isArray(currentDevInfo.modeList) ? currentDevInfo.modeList : [];
+        var modeOptions = modeList.map(function(m){
+          var id = (m && (m.modeId!=null ? m.modeId : m.id!=null ? m.id : '')) + '';
+          var name = (m && (m.modeName || m.name)) ? (m.modeName || m.name) : '';
+          return '<option value="'+ id +'">'+ String(name) +'</option>';
+        }).join('');
+
+        var camCount = (currentDevInfo.hardwareInfo && Number(currentDevInfo.hardwareInfo.cameraCount)) || 0;
+        var mediaRowHtml = '';
+        if (camCount > 0) {
+          var streamOpts = camCount >= 2
+            ? '<option value="main">主码流</option><option value="sub">副码流</option>'
+            : '<option value="main">主码流</option>';
+          mediaRowHtml =
+            '<div class="ov-row ov-row-media">'
+              + '<label>媒体流：</label>'
+              + '<select id="ovStreamSel">'+ streamOpts +'</select>'
+              + '<button class="btn" id="btnOpenVideo">打开视频</button>'
+            + '</div>';
+        }
 
         var html =
           '<div class="ov-hd">'
-            + '<div>'+ (currentDevInfo.no || String(currentDevInfo.id||"")) +' '+ onlineTag +'</div>'
-            + '<button id="ovCloseBtn" class="ov-close">✕</button>'
+            + '<span class="ov-ic '+ tClass +'"></span>'
+            + '<div class="ov-row1">'
+              + '<span class="ov-name">'+ escapeHtml(currentDevInfo.no || String(currentDevInfo.id||"")) +'</span>'
+              + '<div class="ov-batt '+battery.cls+'">'
+                + '<span class="batt-fill" style="width:'+ battery.n +'%;"></span>'
+                + '<span class="batt-txt">'+ battery.text +'</span>'
+              + '</div>'
+              + '<button id="ovCloseBtn" class="ov-close" title="关闭">✕</button>'
+            + '</div>'
+            + '<div class="ov-row2">'
+              + '<span class="ov-status '+statusCls+'">'+ statusText +'</span>'
+              + '<button class="btn" id="btnOpenDetail" style="margin-left:auto;">详情</button>'
+            + '</div>'
           + '</div>'
           + '<div class="ov-bd">'
-            + '<div>位置：'+ posText +'</div>'
-            + '<div>更新时间：'+ timeText +'  速度：'+ (currentDevInfo.lastLocation ? ((currentDevInfo.lastLocation.speed||0) + ' km/h') : '') +'</div>'
-          + '</div>'
-          + '<div class="ov-actions">'
-            + '<button class="btn" id="btnOpenVideo">打开视频</button>'
-            + '<label>设备模式：<select id="ovModeSel">'+ options +'</select></label>'
-            + '<button class="btn" id="btnOpenMode">打开模式</button>'
-            + '<button class="btn" id="btnRefreshInfo" style="margin-left:auto;background:#203246">刷新</button>'
+            + '<div class="ov-row">'
+              + '<label>位置：</label>'
+              + '<span class="mono" style="flex:1 1 auto;min-width:120px;">'+ escapeHtml(posText) +'</span>'
+              + '<button class="btn-icon" id="btnRefreshInfo" title="刷新">'
+                + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6a6 6 0 0 1 5.657 4H16l3.5 3.5L23 10h-2.04A8 8 0 1 0 20 16h-2a6 6 0 1 1-6-10z"/></svg>'
+              + '</button>'
+            + '</div>'
+            + (hasLL
+              ? ('<div class="ov-row ov-row-addr">'
+                  + '<label></label>'
+                  + '<button class="btn" id="btnShowAddr">显示地址</button>'
+                  + '<span id="addrText" class="addr-text"></span>'
+                 + '</div>')
+              : '')
+            + '<div class="ov-row"><label>定位时间：</label><span>'+ escapeHtml(timeText) +'</span><label style="margin-left:16px;min-width:auto;">速度：</label><span>'+ escapeHtml(speedText) +'</span></div>'
+            + mediaRowHtml
+            + (modeList.length>0
+              ? ('<div class="ov-row">'
+                  + '<label>设备模式：</label>'
+                  + '<select id="ovModeSel">'+ modeOptions +'</select>'
+                  + '<button class="btn" id="btnOpenMode">打开模式</button>'
+                 + '</div>')
+              : '')
           + '</div>';
 
         var w=document.createElement("div"); w.className="ov-wrap"; w.innerHTML = html;
         if(!infoWindow) infoWindow=new AMap.InfoWindow({ isCustom:true, offset:new AMap.Pixel(0,-20), closeWhenClickMap:true });
         infoWindow.setContent(w); infoWindow.open(map,pos);
 
-        // 打开后锁定尺寸，后续不再变化
         setTimeout(function(){ lockSizeOnce(w); }, 0);
         setTimeout(function(){ lockSizeOnce(w); }, 60);
 
-        // 信息窗内部也不产生选区
         w.addEventListener('mousedown', function(){ try{ var s=window.getSelection(); if(s) s.removeAllRanges(); }catch(e){} }, true);
 
-        w.querySelector("#ovCloseBtn").addEventListener("click",function(){ try{ infoWindow&&infoWindow.close(); }catch(e){} });
-        w.querySelector("#btnOpenVideo").addEventListener("click",function(){ post({ t:"openVideo", devId: currentDevInfo.id, devNo: currentDevInfo.no }); });
-        w.querySelector("#btnOpenMode").addEventListener("click",function(){
-          var sel=w.querySelector("#ovModeSel"); var modeId = sel && sel.value;
-          post({ t:"openMode", devId: currentDevInfo.id, devNo: currentDevInfo.no, modeId: modeId });
-        });
-        w.querySelector("#btnRefreshInfo").addEventListener("click",function(){ post({ t:"refreshDevice", devId: currentDevInfo.id }); });
+        var closeBtn = w.querySelector("#ovCloseBtn");
+        closeBtn && closeBtn.addEventListener("click",function(){ try{ infoWindow&&infoWindow.close(); }catch(e){} });
+
+        var btnRefresh = w.querySelector("#btnRefreshInfo");
+        if (btnRefresh) {
+          btnRefresh.addEventListener("click",function(){ post({ t:"refreshDevice", devId: currentDevInfo.id }); });
+        }
+
+        var btnShowAddr = w.querySelector("#btnShowAddr");
+        if (btnShowAddr && hasLL) {
+          btnShowAddr.addEventListener("click", function(){
+            var addrEl = w.querySelector('#addrText');
+            if (!addrEl) return;
+            addrEl.textContent = '解析中...';
+            ensureGeocoder(function(){
+              if (!geocoder) { addrEl.textContent = '逆地理失败'; return; }
+              geocoder.getAddress([currentDevInfo.lastLocation.lng, currentDevInfo.lastLocation.lat], function(status, result){
+                if (status === 'complete' && result && result.regeocode && result.regeocode.formattedAddress) {
+                  addrEl.textContent = result.regeocode.formattedAddress;
+                } else {
+                  addrEl.textContent = '未找到地址';
+                }
+              });
+            });
+          });
+        }
+
+        var btnVideo = w.querySelector("#btnOpenVideo");
+        if (btnVideo) {
+          btnVideo.addEventListener("click",function(){
+            var streamSelEl = w.querySelector('#ovStreamSel');
+            var streamType = streamSelEl ? String(streamSelEl.value || 'main') : 'main';
+            post({ t:"openVideo", devId: currentDevInfo.id, devNo: currentDevInfo.no, cameraIndex: 1, streamType });
+          });
+        }
+
+        var btnMode = w.querySelector("#btnOpenMode");
+        if (btnMode) {
+          btnMode.addEventListener("click",function(){
+            var sel=w.querySelector("#ovModeSel");
+            var modeId = sel && sel.value;
+            post({ t:"openMode", devId: currentDevInfo.id, devNo: currentDevInfo.no, modeId: modeId });
+          });
+        }
+
+        var btnDetail = w.querySelector("#btnOpenDetail");
+        if (btnDetail) {
+          btnDetail.addEventListener("click", function(){
+            post({ t:"openDetail", devId: currentDevInfo.id, devNo: currentDevInfo.no });
+          });
+        }
+
         log("openDevice", pos);
       }
 
       function setCenter(lng,lat){ try{ map&&map.setCenter([lng,lat]); }catch(e){} }
       function resize(){ try{ map&&map.resize(); }catch(e){} }
 
-      // 等父页面发来 init 后再加载 SDK
+      function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]);}); }
+
       window.addEventListener("message", function(e){
         var msg=e.data||{}; if(!msg.__mv) return;
         switch(msg.t){
