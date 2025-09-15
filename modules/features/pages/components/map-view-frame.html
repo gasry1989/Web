@@ -30,6 +30,8 @@
       var map=null,markers=[],infoWindow=null, geocoder=null, mounted=false;
       var infoFrame=null, infoWindowOpen=false;
       var currentDevInfo=null;
+      // 记录信息窗的上次位置（满足：无经纬度 -> 用上次；首次无经纬度 -> 地图中心）
+      var lastInfoPos=null; // { lng, lat }
 
       function ensureAMap(cb){
         if(!AMAP_KEY){ post({t:"error",message:"缺少高德 Key（AMAP_KEY）"}); return; }
@@ -125,12 +127,20 @@
         }catch(e){}
       }
 
-      // 核心：仅移动位置与下发数据，不重新打开
+      // 核心：仅移动位置与下发数据，不重新打开；无经纬度 → 上次位置 → 首次则居中
       function openDevice(devInfo, followCenterWhenNoLocation){
         if(!mounted) return;
         currentDevInfo = devInfo || {};
         var hasLL = !!(currentDevInfo && currentDevInfo.lastLocation && currentDevInfo.lastLocation.lng!=null && currentDevInfo.lastLocation.lat!=null);
-        var pos = hasLL ? [currentDevInfo.lastLocation.lng,currentDevInfo.lastLocation.lat] : map.getCenter();
+
+        var pos;
+        if (hasLL) {
+          pos = [currentDevInfo.lastLocation.lng, currentDevInfo.lastLocation.lat];
+        } else if (lastInfoPos && lastInfoPos.lng!=null && lastInfoPos.lat!=null) {
+          pos = [lastInfoPos.lng, lastInfoPos.lat];
+        } else {
+          pos = map.getCenter();
+        }
 
         ensureInfoContent();
 
@@ -140,8 +150,15 @@
           try{ infoWindow.setPosition(pos); }catch(e){}
         }
 
+        // 记录上次位置（供下一次无经纬度设备使用）
+        try{
+          var p = infoWindow.getPosition();
+          if (p) lastInfoPos = { lng: p.lng, lat: p.lat };
+          else if (Array.isArray(pos)) lastInfoPos = { lng: pos[0], lat: pos[1] };
+        }catch(e){}
+
         sendDataToChild();
-        log("update infoWindow", { opened:infoWindowOpen, hasLL:hasLL, pos:pos });
+        log("update infoWindow", { opened:infoWindowOpen, hasLL:hasLL, pos:pos, lastInfoPos:lastInfoPos });
       }
 
       function setCenter(lng,lat){ try{ map&&map.setCenter([lng,lat]); }catch(e){} }

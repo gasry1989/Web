@@ -1,13 +1,17 @@
 /**
- * SitePage（装配）
- * 更新：
- *  - 等待树组件 whenReady() 后再注册筛选监听并调用 bootstrapData，避免首次空引用
+ * SitePage 修改点：
+ * 1) 模式窗口标题显示具体模式名称
+ * 2) window.pushModeData 已存在（上一轮改动），保留
+ * 3)（无改）Mock 喂数保持 300ms，你可继续使用
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './modes/VideoPreview.js';
 import { createModePreview } from './modes/ModePreview.js';
+import { createModeTilt } from './modes/ModeTilt.js';
+import { createModeDispTilt } from './modes/ModeDispTilt.js';
+import { createModeAudio } from './modes/ModeAudio.js';
 import { createMapView } from './components/MapView.js';
-import { ENV } from '/config/env.js'; // 统一从 /config/env.js 获取 AMAP_KEY
+import { ENV } from '/config/env.js';
 import { siteState } from '@state/siteState.js';
 
 import {
@@ -20,6 +24,11 @@ import { importTemplate } from '@ui/templateLoader.js';
 const SRS_FIXED_URL = 'webrtc://media.szdght.com/1/camera_audio';
 const KEY_TREE_COLLAPSED = 'ui.sitepage.tree.collapsed';
 
+// 本地模拟喂数（保持 300ms）
+const urlParams = new URLSearchParams(location.search);
+const ENABLE_MODE_MOCK = urlParams.get('mock') != null ? urlParams.get('mock') === '1' : true;
+const MOCK_INTERVAL_MS = 300;
+
 let __prevHtmlOverflow = '';
 let __prevBodyOverflow = '';
 let __prevMainStyle = null;
@@ -28,7 +37,19 @@ let rootEl = null;
 let tree = null;
 let mapView = null;
 
-const mediaSlots = Array.from({ length: 6 }, (_, i) => ({ idx:i, type:null, inst:null }));
+const mediaSlots = Array.from({ length: 6 }, (_, i) => ({ idx:i, type:null, inst:null, devId:null, modeId:null }));
+
+const mockState = new Map();
+let mockTimer = null;
+
+const MODE_NAME = (mid)=>{
+  switch(Number(mid)){
+    case 1: return '倾角模式';
+    case 2: return '位移·倾角模式';
+    case 3: return '音视频模式';
+    default: return '模式';
+  }
+};
 
 export function mountSitePage() {
   __prevHtmlOverflow = document.documentElement.style.overflow;
@@ -66,7 +87,6 @@ export function mountSitePage() {
       tree = createTreePanel();
       leftWrap.appendChild(tree);
 
-      // 等待树模板渲染完成后再进行后续初始化，避免空引用
       try { await (tree.whenReady ? tree.whenReady() : Promise.resolve()); } catch {}
 
       // 折叠状态
@@ -85,7 +105,7 @@ export function mountSitePage() {
         try { mapView.resize(); } catch {}
       });
 
-      // 监听树筛选变化（防抖）
+      // 筛选变化
       const onTreeFiltersChange = debounce(() => { reloadByFilters(); }, 250);
       ['filtersChange','filterchange','filterschange','filters:change'].forEach(evt => {
         try { tree.addEventListener(evt, onTreeFiltersChange); } catch {}
@@ -93,9 +113,9 @@ export function mountSitePage() {
       leftWrap.addEventListener('input', onTreeFiltersChange, true);
       leftWrap.addEventListener('change', onTreeFiltersChange, true);
 
-      // 地图：只在父页面配置一次 Key，这里传给 MapView
+      // 地图
       mapView = createMapView({
-        amapKey: (ENV && ENV.AMAP_KEY) || (window.__AMAP_KEY || ''), // 统一来源：/config/env.js
+        amapKey: (ENV && ENV.AMAP_KEY) || (window.__AMAP_KEY || ''),
         debug: true
       });
       mapMount.appendChild(mapView);
@@ -107,15 +127,17 @@ export function mountSitePage() {
       mapView.addEventListener('markerClick', async (e) => {
         try {
           const data = await apiDeviceInfo(e.detail.devId);
-          // 无定位的设备，信息窗会跟随地图中心显示
           mapView.openDevice({ devInfo: data.devInfo, followCenterWhenNoLocation: true });
         } catch (err) {
           console.error('[Site] markerClick -> openDevice error', err);
         }
       });
-      // 树点击 -> 信息窗
+      // 树点击 -> 信息窗（无经纬度：MapView 内部会按“上次位置/首次居中”逻辑处理）
       tree.addEventListener('deviceclick', async (e)=>{
-        try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{}
+        try{
+          const data=await apiDeviceInfo(e.detail.devId);
+          mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true });
+        }catch{}
       });
 
       // 媒体关闭
@@ -124,15 +146,28 @@ export function mountSitePage() {
       // 分隔条
       initSplitter(leftWrap, splitter, ()=>{ try{ mapView.resize(); }catch{} });
 
-      // 重置窗口状态（0→5 顺序）
+      // 清空网格状态
       for (let i=0;i<mediaSlots.length;i++) {
-        mediaSlots[i].type = null; mediaSlots[i].inst = null;
-        const body = document.getElementById(`mediaBody${i}`);
-        if (body) body.setAttribute('data-free','1');
+        mediaSlots[i].type = null; mediaSlots[i].inst = null; mediaSlots[i].devId=null; mediaSlots[i].modeId=null;
+        const body = document.getElementById(`mediaBody${i}`); if (body) body.setAttribute('data-free','1');
       }
 
-      // 首次加载（此时树已就绪）
+      // 首屏数据
       bootstrapData(statusPanel.querySelector('#summaryChart'), notifyPanel.querySelector('#notifyList'));
+
+      // 路由：外部 WS/Mock 都调用它
+      window.pushModeData = function pushModeData({ devId, modeId, data }) {
+        try {
+          const s = mediaSlots.find(x => x.type==='mode' && String(x.devId)===String(devId) && Number(x.modeId)===Number(modeId));
+          if (!s || !s.inst || typeof s.inst.setData!=='function') return;
+          s.inst.setData(data);
+        } catch (e) {
+          console.warn('[Site] pushModeData error', e);
+        }
+      };
+      console.info('[Site] window.pushModeData ready: pushModeData({devId, modeId, data})');
+
+      if (ENABLE_MODE_MOCK) startMockFeeder();
     })
     .catch(err => console.error('[SitePage] template load failed', err));
 }
@@ -140,7 +175,8 @@ export function mountSitePage() {
 export function unmountSitePage() {
   document.documentElement.style.overflow = __prevHtmlOverflow;
   document.body.style.overflow = __prevBodyOverflow;
-  mediaSlots.forEach(s=>{ if(s.inst?.destroy){ try{s.inst.destroy();}catch{} } s.inst=null; s.type=null; });
+  stopMockFeeder();
+  mediaSlots.forEach(s=>{ if(s.inst?.destroy){ try{s.inst.destroy();}catch{} } s.inst=null; s.type=null; s.devId=null; s.modeId=null; });
   try{ mapView?.destroy(); }catch{} mapView=null;
   if (rootEl){ try{ rootEl.remove(); }catch{} rootEl=null; }
   const main=document.getElementById('mainView');
@@ -248,7 +284,7 @@ function renderNotify(el, list) {
 function initSplitter(leftWrap, splitter, onDrag) {
   const MIN = 240, MAXVW = 50;
   splitter.addEventListener('mousedown', (e) => {
-    if (leftWrap.classList.contains('collapsed')) return; // 折叠时不允许拖拽
+    if (leftWrap.classList.contains('collapsed')) return;
     const layoutRect = rootEl.getBoundingClientRect();
     const maxPx = Math.floor(window.innerWidth * (MAXVW / 100));
     const glass = document.createElement('div');
@@ -301,7 +337,6 @@ async function openVideoInSlot(devId, devNo) {
   const title = document.getElementById(`mediaTitle${idx}`);
   const vp = createVideoPreview({ objectFit:'fill' });
 
-  // 关键：视频容器自身也给到稳定的合成/不抢焦点
   try {
     vp.style.willChange = 'transform';
     vp.style.transform = 'translateZ(0)';
@@ -312,7 +347,7 @@ async function openVideoInSlot(devId, devNo) {
   body.innerHTML = ''; body.appendChild(vp);
   body.setAttribute('data-free','0');
   title.textContent = `${devNo} 视频`;
-  mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp;
+  mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp; mediaSlots[idx].devId=null; mediaSlots[idx].modeId=null;
 
   try { await vp.play(SRS_FIXED_URL); }
   catch {
@@ -325,16 +360,28 @@ function openModeInSlot(devId, devNo, modeId) {
   if (idx === -1) { eventBus.emit('toast:show', { type:'error', message:'没有可用窗口' }); return; }
   const body = document.getElementById(`mediaBody${idx}`);
   const title = document.getElementById(`mediaTitle${idx}`);
-  const mp = createModePreview({ modeId, devId });
-  body.innerHTML = ''; body.appendChild(mp.el); mp.start();
+
+  let mp = null;
+  const mid = Number(modeId);
+  if (mid === 1) mp = createModeTilt({ devId });
+  else if (mid === 2) mp = createModeDispTilt({ devId });
+  else if (mid === 3) mp = createModeAudio({ devId });
+  else {
+    console.warn('[Site] unknown modeId:', modeId, 'use ModePreview fallback');
+    mp = createModePreview({ modeId, devId });
+  }
+
+  body.innerHTML = ''; body.appendChild(mp.el);
   body.setAttribute('data-free','0');
-  title.textContent = `${devNo} 模式`;
-  mediaSlots[idx].type = 'mode'; mediaSlots[idx].inst = mp;
+  title.textContent = `${devNo} ${MODE_NAME(mid)}`;
+  mediaSlots[idx].type = 'mode'; mediaSlots[idx].inst = mp; mediaSlots[idx].devId = devId; mediaSlots[idx].modeId = mid;
+
+  try { mp.start && mp.start(); } catch {}
 }
 function closeSlot(idx) {
   const s = mediaSlots[idx]; if (!s) return;
   if (s.inst?.destroy) { try { s.inst.destroy(); } catch {} }
-  s.inst=null; s.type=null;
+  s.inst=null; s.type=null; s.devId=null; s.modeId=null;
   const body = document.getElementById(`mediaBody${idx}`);
   const title = document.getElementById(`mediaTitle${idx}`);
   if (body) {
@@ -344,11 +391,86 @@ function closeSlot(idx) {
   if (title) title.textContent = '空闲';
 }
 
+/* ---------------- MOCK：300ms 本地演示 ---------------- */
+function startMockFeeder(){
+  stopMockFeeder();
+  console.info('[MOCK] enabled, interval=', MOCK_INTERVAL_MS, 'ms');
+  mockTimer = setInterval(()=>{
+    mediaSlots.forEach(s=>{
+      if (s.type!=='mode' || s.devId==null || s.modeId==null) return;
+      const sendPayload = { t:'mode_pull', devId: s.devId, modeId: s.modeId };
+      console.debug('[MOCK][send]', JSON.stringify(sendPayload));
+      const resp = genMockResponse(s.devId, s.modeId);
+      console.debug('[MOCK][recv]', JSON.stringify({ t:'mode_data', devId:s.devId, modeId:s.modeId, preview: previewForLog(resp)}));
+      try { window.pushModeData && window.pushModeData({ devId: s.devId, modeId: s.modeId, data: resp }); } catch(e){ console.warn('[MOCK] push error', e); }
+    });
+  }, MOCK_INTERVAL_MS);
+}
+function stopMockFeeder(){ try{ mockTimer && clearInterval(mockTimer); }catch{} mockTimer=null; }
+function getKey(devId, modeId){ return String(devId)+'|'+String(modeId); }
+function ensureState(devId, modeId, init){
+  const k=getKey(devId, modeId);
+  if(!mockState.has(k)) mockState.set(k, init());
+  return mockState.get(k);
+}
+function clamp(v,min,max){ return v<min?min:v>max?max:v; }
+function step(v,amp,min,max){ return clamp(v + (Math.random()*2-1)*amp, min, max); }
+function prob(p){ return Math.random() < p; }
+function rnd(a,b){ return Math.random()*(b-a)+a; }
+function previewForLog(d){
+  if (d.items) return { n:d.items.length, first:d.items[0] };
+  return { n:(d.values?.length||0), first:d.values?.[0] };
+}
+function genMockResponse(devId, modeId){
+  const mid = Number(modeId);
+  if (mid===1){
+    const st = ensureState(devId, mid, ()=>({
+      items: Array.from({length:2},(_,i)=>({ name:`倾角${i+1}#`, deg: rnd(0,1), batt: rnd(70,100), alarmOn: Math.random()>.2, sirenOn: Math.random()>.2 }))
+    }));
+    st.items.forEach(it=>{
+      it.deg = step(it.deg, 0.15, 0, 1.5);
+      if (prob(0.05)) it.alarmOn = !it.alarmOn;
+      if (prob(0.05)) it.sirenOn = !it.sirenOn;
+      if (prob(0.02)) it.batt = clamp(it.batt - 1, 0, 100);
+    });
+    return { items: st.items.map(x=>({ ...x })) };
+  }
+  if (mid===2){
+    const st = ensureState(devId, mid, ()=>({
+      items: [
+        { type:'位移', badge: Math.floor(rnd(10,99)), batt: rnd(70,100), sirenOn:true,  value: 0 },
+        { type:'位移', badge: Math.floor(rnd(10,99)), batt: rnd(70,100), sirenOn:true,  value: 0 },
+        { type:'倾角', badge: Math.floor(rnd(60,99)), batt: rnd(70,100), sirenOn:true,  valueDeg: 0 }
+      ]
+    }));
+    st.items[0].value = step(st.items[0].value, 0.002, 0, 0.012);
+    st.items[1].value = step(st.items[1].value, 0.002, 0, 0.012);
+    st.items[2].valueDeg = step(st.items[2].valueDeg, 0.03, 0, 0.30);
+    st.items.forEach(it=>{
+      if (prob(0.04)) it.sirenOn = !it.sirenOn;
+      if (prob(0.02)) it.badge = clamp((it.badge|0) + (Math.random()<.5?-1:1), 0, 99);
+      if (prob(0.02)) it.batt = clamp(it.batt - 1, 0, 100);
+    });
+    return {
+      items: [
+        { type:'位移', badge: st.items[0].badge, batt: st.items[0].batt, sirenOn: st.items[0].sirenOn, valueText: st.items[0].value.toFixed(3)+'m' },
+        { type:'位移', badge: st.items[1].badge, batt: st.items[1].batt, sirenOn: st.items[1].sirenOn, valueText: st.items[1].value.toFixed(3)+'m' },
+        { type:'倾角', badge: st.items[2].badge, batt: st.items[2].batt, sirenOn: st.items[2].sirenOn, valueText: st.items[2].valueDeg.toFixed(2)+'°' }
+      ]
+    };
+  }
+  const st = ensureState(devId, 3, ()=>({
+    labels:[1,2,10], values:[rnd(0,100), rnd(0,100), rnd(0,100)], batteries:[rnd(60,100), rnd(60,100), rnd(10,100)]
+  }));
+  for (let i=0;i<st.values.length;i++){
+    st.values[i] = clamp(st.values[i] + (Math.random()*2-1)*8, 0, 100);
+    if (prob(0.05)) st.batteries[i] = clamp(st.batteries[i] + (Math.random()*2-1)*3, 0, 100);
+  }
+  return { labels: st.labels.slice(), values: st.values.slice(), batteries: st.batteries.slice() };
+}
+
 /* ---------------- 工具 ---------------- */
 function debounce(fn, wait=300) { let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; }
-function getFiltersFromTree(){
-  // TreePanel.getFilterValues 内部已做兜底，这里直接调用
-  return tree.getFilterValues();
-}
+function getFiltersFromTree(){ return tree.getFilterValues(); }
 function escapeHTML(str=''){return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmt(ts){ if(!ts) return ''; const d=new Date(ts); const p=n=>n<10?'0'+n:n; return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
