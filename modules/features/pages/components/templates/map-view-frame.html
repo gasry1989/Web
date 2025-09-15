@@ -11,7 +11,7 @@
     .amap-canvas, .amap-layer, .amap-marker, .amap-marker-label,
     .amap-overlay-text, .amap-info { -webkit-user-select:none; -moz-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; }
     img, .amap-marker img { -webkit-user-drag:none; user-drag:none; }
-    /* 信息窗内部内容是一个 iframe，样式在子页里，这里只控制尺寸容器 */
+    /* 信息窗内容是一个独立 iframe，内部样式在 map-info-frame.html */
     .ov-iframe{display:block; width:420px; height:10px; border:0; background:transparent;}
   </style>
 </head>
@@ -27,8 +27,9 @@
       var warn=function(){ if(debug) try{ console.warn.apply(console, ["[MapView-IFRAME]"].concat([].slice.call(arguments))); }catch(e){} };
       var post=function(msg){ try{ parent.postMessage(Object.assign({__mv:true},msg),"*"); }catch(e){} };
 
-      var map=null,markers=[],infoWindow=null,followCenter=false,mounted=false,currentDevInfo=null, geocoder=null;
-      var infoFrame=null, lastDevId=null, infoWindowOpen=false;
+      var map=null,markers=[],infoWindow=null, geocoder=null, mounted=false;
+      var infoFrame=null, infoWindowOpen=false;
+      var currentDevInfo=null;
 
       function ensureAMap(cb){
         if(!AMAP_KEY){ post({t:"error",message:"缺少高德 Key（AMAP_KEY）"}); return; }
@@ -54,7 +55,7 @@
           map=new AMap.Map("map",{zoom:5,center:[105,35],viewMode:"2D",dragEnable:true,scrollWheel:true,keyboardEnable:true,doubleClickZoom:true});
           try{ map.setStatus({dragEnable:true,scrollWheel:true,keyboardEnable:true,doubleClickZoom:true}); }catch(e){}
           mounted=true;
-          map.on && map.on("complete", function(){ post({t:"ready"}); log("map complete"); });
+          map.on && map.on("complete", function(){ post({t:"ready"}); });
 
           var clearSel=function(){ try{ var s=window.getSelection && window.getSelection(); if(s&&s.removeAllRanges) s.removeAllRanges(); }catch(e){} };
           map.on && map.on("click", clearSel);
@@ -62,8 +63,6 @@
           map.on && map.on("dragstart", clearSel);
           map.on && map.on("zoomstart", clearSel);
           document.addEventListener("mouseup", clearSel, true);
-
-          map.on && map.on("mapmove", function(){ if(followCenter&&infoWindow){ try{ infoWindow.setPosition(map.getCenter()); }catch(e){} } });
         }catch(e){
           warn("init error",e); post({t:"error",message:"地图初始化失败"});
         }
@@ -73,15 +72,13 @@
       function setMarkers(list){
         if(!mounted) return;
         clearMarkers();
-        var cnt=0;
         (list||[]).forEach(function(e){
           var d=e.devInfo||e;
           if(!d||!d.lastLocation||d.lastLocation.lng==null||d.lastLocation.lat==null) return;
-          var mk=new AMap.Marker({ position:[d.lastLocation.lng,d.lastLocation.lat], title:d.no, draggable:false, bubble:true });
+          var mk=new AMap.Marker({ position:[d.lastLocation.lng,d.lastLocation.lat], title:d.no||d.id, draggable:false, bubble:true });
           mk.on("click", function(){ post({t:"markerClick", devId:d.id}); });
-          mk.setMap(map); markers.push(mk); cnt++;
+          mk.setMap(map); markers.push(mk);
         });
-        log("markers set", cnt);
       }
 
       function lockWidth(el){ try{ var r=el.getBoundingClientRect(); el.style.width=Math.round(r.width)+"px"; }catch(e){} }
@@ -104,19 +101,19 @@
         return { devInfo, hasLL, posText, timeText, speedText, modeList, camCount };
       }
 
-      // 只创建一次 iframe 与 InfoWindow
+      // 只创建一次信息窗内容（iframe）
       function ensureInfoContent(){
         if (!infoWindow) infoWindow = new AMap.InfoWindow({ isCustom:true, offset:new AMap.Pixel(0,-20), closeWhenClickMap:false });
         if (!infoFrame) {
           var ifr=document.createElement('iframe');
           ifr.className='ov-iframe';
-          ifr.src='/modules/features/pages/components/templates/map-info-frame.html'; // 固定地址，避免重复加载
+          ifr.src='/modules/features/pages/components/templates/map-info-frame.html'; // 固定，不加时间戳
           ifr.addEventListener('load', function(){
             setTimeout(function(){ lockWidth(ifr); }, 0);
             setTimeout(function(){ lockWidth(ifr); }, 60);
           });
           infoFrame = ifr;
-          infoWindow.setContent(infoFrame); // 仅首次设置内容
+          infoWindow.setContent(infoFrame); // 仅首次
         }
       }
 
@@ -128,35 +125,29 @@
         }catch(e){}
       }
 
+      // 核心：仅移动位置与下发数据，不重新打开
       function openDevice(devInfo, followCenterWhenNoLocation){
         if(!mounted) return;
         currentDevInfo = devInfo || {};
-        var pos;
-        if(currentDevInfo.lastLocation && currentDevInfo.lastLocation.lng!=null && currentDevInfo.lastLocation.lat!=null){
-          pos=[currentDevInfo.lastLocation.lng,currentDevInfo.lastLocation.lat];
-          followCenter=false;
-        } else {
-          pos=map.getCenter();
-          followCenter=!!followCenterWhenNoLocation;
-        }
+        var hasLL = !!(currentDevInfo && currentDevInfo.lastLocation && currentDevInfo.lastLocation.lng!=null && currentDevInfo.lastLocation.lat!=null);
+        var pos = hasLL ? [currentDevInfo.lastLocation.lng,currentDevInfo.lastLocation.lat] : map.getCenter();
 
-        var isSameDev = (lastDevId != null && currentDevInfo && currentDevInfo.id === lastDevId);
-        lastDevId = currentDevInfo ? currentDevInfo.id : null;
-
-        // 只在首次或切换设备时打开窗口；同一设备刷新只更新数据，不开关窗口、不移动位置
         ensureInfoContent();
-        if (!infoWindowOpen || !isSameDev) {
-          try{ infoWindow.open(map,pos); infoWindowOpen = true; }catch(e){}
-        }
-        sendDataToChild();
 
-        log("openDevice", { devId: currentDevInfo && currentDevInfo.id, same:isSameDev, opened:infoWindowOpen });
+        if (!infoWindowOpen) {
+          try{ infoWindow.open(map,pos); infoWindowOpen = true; }catch(e){}
+        } else {
+          try{ infoWindow.setPosition(pos); }catch(e){}
+        }
+
+        sendDataToChild();
+        log("update infoWindow", { opened:infoWindowOpen, hasLL:hasLL, pos:pos });
       }
 
       function setCenter(lng,lat){ try{ map&&map.setCenter([lng,lat]); }catch(e){} }
       function resize(){ try{ map&&map.resize(); }catch(e){} }
 
-      // 父(本页)与子(信息窗 iframe)通信
+      // 与子页通信
       window.addEventListener('message', function(e){
         var msg=e.data||{};
         // 子 iframe -> 父
@@ -169,7 +160,7 @@
               if (infoFrame) {
                 try{
                   infoFrame.style.height = Math.max(10, Number(msg.h||0)) + 'px';
-                  // 不再 setContent，避免闪
+                  // 不再 setContent，避免闪烁
                 }catch(e){}
               }
               break;
@@ -179,7 +170,7 @@
             case 'openDetail':
               post({ t:'openDetail', devId: msg.devId, devNo: msg.devNo });
               break;
-            case 'refreshDevice': // 子页点刷新：仅向上抛事件，父层拉数据后再次调用 openDevice 即可（不会闪）
+            case 'refreshDevice': // 子页点刷新 => 只向外抛事件，外层拉数据后再调用 openDevice 即可
               post({ t:'refreshDevice', devId: msg.devId });
               break;
             case 'openVideo':
