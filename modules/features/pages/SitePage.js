@@ -7,7 +7,7 @@ import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './components/VideoPreview.js';
 import { createModePreview } from './components/ModePreview.js';
 import { createMapView } from './components/MapView.js';
-import { ENV } from '@config/env.js';
+import { ENV } from '/config/env.js'; // 统一从 /config/env.js 获取 AMAP_KEY
 import { siteState } from '@state/siteState.js';
 
 import {
@@ -93,8 +93,11 @@ export function mountSitePage() {
       leftWrap.addEventListener('input', onTreeFiltersChange, true);
       leftWrap.addEventListener('change', onTreeFiltersChange, true);
 
-      // 地图
-      mapView = createMapView({ amapKey: (ENV && ENV.AMAP_KEY) || (window.__AMAP_KEY || ''), debug: true });
+      // 地图：只在父页面配置一次 Key，这里传给 MapView
+      mapView = createMapView({
+        amapKey: (ENV && ENV.AMAP_KEY) || (window.__AMAP_KEY || ''), // 统一来源：/config/env.js
+        debug: true
+      });
       mapMount.appendChild(mapView);
       mapView.mount();
 
