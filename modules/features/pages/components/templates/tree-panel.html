@@ -15,13 +15,11 @@
       .filters { padding:8px 10px; border-bottom:1px solid var(--panel-line); }
       .filters .row { display:grid; grid-template-columns:1fr; gap:6px; }
 
-      /* 行内布局：文本 + 控件在一行且不换行 */
       .filters label {
         color:var(--text-dim);
         display:flex; align-items:center; gap:8px; white-space:nowrap; width:100%;
       }
 
-      /* 统一深色风格：输入/下拉/文本域（排除复选框） */
       .filters input:not([type="checkbox"]), .filters select, .filters textarea {
         width:100%; background:#0b121a; color:#e3edf4; border:1px solid var(--panel-line); border-radius:4px; padding:6px 8px;
         outline:none; transition:border-color .15s, box-shadow .15s;
@@ -34,11 +32,9 @@
         border-color:#3d78d4; box-shadow:0 0 0 2px rgba(61,120,212,.18);
       }
 
-      /* 复选框主题色 */
       .filters input[type="checkbox"] { accent-color:#0b84d8; inline-size:auto; block-size:auto; }
 
       .tree { flex:1 1 auto; overflow:auto; min-height:0; }
-      /* 滚动条统一样式 */
       .tree { scrollbar-width:thin; scrollbar-color:#33424d #141b20; }
       .tree::-webkit-scrollbar { width:8px; height:8px; }
       .tree::-webkit-scrollbar-track { background:#141b20; }
@@ -55,11 +51,9 @@
       .toggle.is-empty { visibility:hidden; }
       .ic-user { display:none; }
 
-      /* 补回用户在线/离线配色（关键修复） */
       .row.is-online .title { color: var(--on); }
       .row.is-offline .title { color: var(--off); }
 
-      /* 设备项 hover 效果，与未分组 chip 一致 */
       .node.dev {
         display:flex; align-items:center; gap:6px;
         padding:6px 8px; border-radius:4px; cursor:pointer;
@@ -77,10 +71,18 @@
       .children { margin-left:18px; border-left:1px dashed rgba(255,255,255,.12); padding-left:10px; }
       .children.is-collapsed { display:none; }
 
-      /* 未分组设备 chip */
-      .sec { margin:8px 8px 12px; }
-      .sec__title { font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e; border-radius:4px; border:1px solid rgba(255,255,255,.08); }
+      /* 未分组设备区，可折叠 */
+      .sec { margin:8px 8px 12px; border-radius:4px; }
+      .sec__title {
+        font-weight:600; padding:6px 8px; color:#e1edf7; background:#10212e;
+        border-radius:4px; border:1px solid rgba(255,255,255,.08);
+        display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
+      }
+      .sec__title::before { content:'▾'; width:16px; text-align:center; color:#9fb1bb; }
+      .sec.is-collapsed .sec__title::before { content:'▸'; }
       .list { padding:6px 8px; display:flex; flex-direction:column; gap:4px; }
+      .sec.is-collapsed .list { display:none; }
+
       .chip { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:4px; cursor:pointer; border:1px solid transparent; }
       .chip:hover { background:#15202b; border:1px solid rgba(255,255,255,.08); }
       .chip .ic-dev { width:12px; height:12px; border-radius:2px; }
@@ -97,7 +99,6 @@
           <label>设备模式：<select id="fltDevMode"><option value="0">全部</option></select></label>
           <label>名称/编号：<input id="fltSearch" placeholder="模糊搜索"/></label>
           <label class="chk"><input type="checkbox" id="fltOnline"/> 仅显示在线</label>
-          <!-- 刷新按钮已移除，筛选变动会自动刷新 -->
         </div>
       </div>
       <div class="tree" id="tree"></div>

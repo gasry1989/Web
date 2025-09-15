@@ -3,7 +3,8 @@
  * 更新：
  *  - 暴露 whenReady()，模板加载完成后再对外可用
  *  - getFilterValues 做空节点兜底，避免空引用
- *  - NEW: 自动监听筛选控件变更并重渲染；仅显示在线过滤在渲染期生效
+ *  - 自动监听筛选控件变更并重渲染；仅显示在线过滤在渲染期生效
+ *  - NEW: “未分组设备”支持点击标题折叠/展开（状态保存在本地 state）
  */
 export function createTreePanel() {
   const host = document.createElement('div');
@@ -12,29 +13,24 @@ export function createTreePanel() {
   const ready = deferred();
   let isReady = false;
 
-  // 统一处理筛选控件变更：自动重渲染并对外派发 filterchange
   function onFilterChanged(e) {
     const t = e && e.target;
     if (!t || !t.id) return;
     const ids = new Set(['fltDevType', 'fltDevMode', 'fltSearch', 'fltOnline']);
     if (!ids.has(t.id)) return;
-    // 对外通知（保持外部可接管服务端筛选等逻辑）
     host.dispatchEvent(new CustomEvent('filterchange', {
       bubbles: true,
       detail: getFilterValues()
     }));
-    // 本地应用（至少“仅显示在线”要即时生效）
     render();
   }
 
-  // 注入模板
   (async () => {
     try {
       const html = await fetch('/modules/features/pages/components/templates/tree-panel.html', { cache: 'no-cache' }).then(r => r.text());
       const frag = new DOMParser().parseFromString(html, 'text/html').querySelector('#tpl-tree-panel').content.cloneNode(true);
       root.appendChild(frag);
 
-      // 模板就绪后，绑定筛选变化监听（自动刷新）
       root.addEventListener('input', onFilterChanged);
       root.addEventListener('change', onFilterChanged);
 
@@ -43,29 +39,26 @@ export function createTreePanel() {
       host.dispatchEvent(new Event('ready'));
     } catch (e) {
       ready.reject(e);
-      // 失败也不抛出到外层，保证 host 可用
-      // 但没有模板时后续渲染将是空白
     }
   })();
 
   function render() {
     const treeEl = root.getElementById('tree');
-    if (!treeEl) return; // 模板未就绪
+    if (!treeEl) return;
 
-    // 从控件读取当前过滤状态（getFilterValues 已做兜底）
     const { onlyOnline } = getFilterValues();
 
     const roots = buildForest(state.groupedDevices);
     const expandLevel = state.expandLevel || 2;
 
-    // 未分组设备过滤与计数
     const ungrouped = onlyOnline
       ? state.ungroupedDevices.filter(e => !!(e.devInfo && e.devInfo.onlineState))
       : state.ungroupedDevices;
 
+    const secCls = state.ungroupedCollapsed ? 'is-collapsed' : '';
     const html = `
       <div class="gdt">${roots.map(r => renderUserNodeHTML(r, 1, expandLevel, onlyOnline)).join('')}</div>
-      <div class="sec">
+      <div class="sec ${secCls}">
         <div class="sec__title">未分组设备 (${ungrouped.length})</div>
         <div class="list">
           ${ungrouped.map(e => {
@@ -81,7 +74,8 @@ export function createTreePanel() {
     treeEl.innerHTML = html;
   }
 
-  let state = { groupedDevices: [], ungroupedDevices: [], expandLevel: 2 };
+  let state = { groupedDevices: [], ungroupedDevices: [], expandLevel: 2, ungroupedCollapsed: false };
+
   function normalizeUserInfo(ui) {
     if (!ui) return null;
     return {
@@ -120,16 +114,13 @@ export function createTreePanel() {
     return roots;
   }
 
-  // 增加 onlyOnline 过滤渲染
   function renderUserNodeHTML(node, level, expandLevel, onlyOnline = false) {
-    // 仅显示在线时：整节点离线且无在线后代，则不渲染
     if (onlyOnline && !node.isOnline) return '';
 
     const name = (node.userName || '').trim();
     const expanded = level <= expandLevel;
     const cls = node.isOnline ? 'is-online' : 'is-offline';
 
-    // 匿名用户节点（把子用户与设备平铺渲染）
     if (!name) {
       const childHTML = (node.children || []).map(c => renderUserNodeHTML(c, level, expandLevel, onlyOnline)).join('');
       const devHTML = ((node.deviceChildren || []).filter(d => !onlyOnline || d.onlineState)).map(d => `
@@ -141,7 +132,6 @@ export function createTreePanel() {
       return childHTML + devHTML;
     }
 
-    // 先渲染子项，依据实际内容判断是否有子项（避免仅在线过滤后出现“空可展开”）
     const childrenUsersHTML = (node.children || []).map(c => renderUserNodeHTML(c, level + 1, expandLevel, onlyOnline)).join('');
     const devicesHTML = ((node.deviceChildren || []).filter(d => !onlyOnline || d.onlineState)).map(d => `
           <div class="node dev ${d.onlineState ? 'is-online' : 'is-offline'}" data-devid="${d.devId}">
@@ -164,8 +154,16 @@ export function createTreePanel() {
     return `<div class="node user" data-user-id="${node.userId}">${head}${children}</div>`;
   }
 
-  // 事件（模板未就绪时也可提前绑定到 shadow root）
+  // 事件
   root.addEventListener('click', (e) => {
+    // 切换“未分组设备”折叠
+    const secTitle = e.target.closest('.sec__title');
+    if (secTitle) {
+      state.ungroupedCollapsed = !state.ungroupedCollapsed;
+      render();
+      return;
+    }
+
     const row = e.target.closest('.row[data-node-type="user"]');
     if (row) {
       const nodeEl = row.parentElement;
@@ -185,7 +183,6 @@ export function createTreePanel() {
     state.groupedDevices = groupedDevices;
     state.ungroupedDevices = ungroupedDevices;
     state.expandLevel = expandLevel;
-    // 模板可能尚未就绪时，延后一次
     const apply = () => {
       if (devTypes) {
         const sel = root.getElementById('fltDevType');
@@ -209,7 +206,6 @@ export function createTreePanel() {
   }
 
   function getFilterValues() {
-    // 节点不存在时提供默认值，避免空引用
     const tSel = root.getElementById('fltDevType');
     const mSel = root.getElementById('fltDevMode');
     const sInp = root.getElementById('fltSearch');
