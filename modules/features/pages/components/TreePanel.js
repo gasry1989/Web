@@ -1,20 +1,35 @@
 /**
  * TreePanel 设备树（Shadow DOM）- 模板化
- * 变更：去掉 refreshBtn 引用，其他 API 不变
+ * 更新：
+ *  - 暴露 whenReady()，模板加载完成后再对外可用
+ *  - getFilterValues 做空节点兜底，避免空引用
  */
 export function createTreePanel() {
   const host = document.createElement('div');
   const root = host.attachShadow({ mode: 'open' });
 
+  const ready = deferred();
+  let isReady = false;
+
+  // 注入模板
   (async () => {
-    const frag = await (await fetch('/modules/features/pages/components/templates/tree-panel.html', { cache: 'no-cache' })
-      .then(r=>r.text()).then(t=> new DOMParser().parseFromString(t, 'text/html')))
-      .querySelector('#tpl-tree-panel').content.cloneNode(true);
-    root.appendChild(frag);
+    try {
+      const html = await fetch('/modules/features/pages/components/templates/tree-panel.html', { cache: 'no-cache' }).then(r => r.text());
+      const frag = new DOMParser().parseFromString(html, 'text/html').querySelector('#tpl-tree-panel').content.cloneNode(true);
+      root.appendChild(frag);
+      isReady = true;
+      ready.resolve(true);
+      host.dispatchEvent(new Event('ready'));
+    } catch (e) {
+      ready.reject(e);
+      // 失败也不抛出到外层，保证 host 可用
+      // 但没有模板时后续渲染将是空白
+    }
   })();
 
   function render() {
     const treeEl = root.getElementById('tree');
+    if (!treeEl) return; // 模板未就绪
     const roots = buildForest(state.groupedDevices);
     const expandLevel = state.expandLevel || 2;
     const html = `
@@ -23,7 +38,9 @@ export function createTreePanel() {
         <div class="sec__title">未分组设备 (${state.ungroupedDevices.length})</div>
         <div class="list">
           ${state.ungroupedDevices.map(e => {
-            const d = e.devInfo || {}; const name = d.no || d.name || String(d.id || ''); const cls = d.onlineState ? 'is-online' : 'is-offline';
+            const d = e.devInfo || {};
+            const name = d.no || d.name || String(d.id || '');
+            const cls = d.onlineState ? 'is-online' : 'is-offline';
             return `<div class="chip ${cls}" data-devid="${d.id}" title="${escapeHTML(name)}">
               <span class="ic-dev"></span><span class="title">${escapeHTML(name)}</span>
             </div>`;
@@ -108,6 +125,7 @@ export function createTreePanel() {
     return `<div class="node user" data-user-id="${node.userId}">${head}${children}</div>`;
   }
 
+  // 事件（模板未就绪时也可提前绑定到 shadow root）
   root.addEventListener('click', (e) => {
     const row = e.target.closest('.row[data-node-type="user"]');
     if (row) {
@@ -128,27 +146,43 @@ export function createTreePanel() {
     state.groupedDevices = groupedDevices;
     state.ungroupedDevices = ungroupedDevices;
     state.expandLevel = expandLevel;
-    if (devTypes) {
-      const sel = root.getElementById('fltDevType'); const cur = sel.value;
-      sel.innerHTML = `<option value="0">全部</option>` + devTypes.map(t => `<option value="${t.typeId}">${t.typeName}</option>`).join('');
-      sel.value = cur || '0';
-    }
-    if (devModes) {
-      const sel = root.getElementById('fltDevMode'); const cur = sel.value;
-      sel.innerHTML = `<option value="0">全部</option>` + devModes.map(m => `<option value="${m.modeId}">${m.modeName}</option>`).join('');
-      sel.value = cur || '0';
-    }
-    render();
+    // 模板可能尚未就绪时，延后一次
+    const apply = () => {
+      if (devTypes) {
+        const sel = root.getElementById('fltDevType');
+        if (sel) {
+          const cur = sel.value;
+          sel.innerHTML = `<option value="0">全部</option>` + devTypes.map(t => `<option value="${t.typeId}">${t.typeName}</option>`).join('');
+          sel.value = cur || '0';
+        }
+      }
+      if (devModes) {
+        const sel = root.getElementById('fltDevMode');
+        if (sel) {
+          const cur = sel.value;
+          sel.innerHTML = `<option value="0">全部</option>` + devModes.map(m => `<option value="${m.modeId}">${m.modeName}</option>`).join('');
+          sel.value = cur || '0';
+        }
+      }
+      render();
+    };
+    if (isReady) apply(); else ready.promise.then(apply).catch(()=>{});
   }
+
   function getFilterValues() {
-    const devType = Number(root.getElementById('fltDevType').value || '0');
-    const devMode = Number(root.getElementById('fltDevMode').value || '0');
-    const searchStr = root.getElementById('fltSearch').value.trim();
-    const onlyOnline = root.getElementById('fltOnline').checked;
+    // 节点不存在时提供默认值，避免空引用
+    const tSel = root.getElementById('fltDevType');
+    const mSel = root.getElementById('fltDevMode');
+    const sInp = root.getElementById('fltSearch');
+    const cChk = root.getElementById('fltOnline');
+    const devType = Number((tSel && tSel.value) || '0');
+    const devMode = Number((mSel && mSel.value) || '0');
+    const searchStr = (sInp && sInp.value ? sInp.value.trim() : '');
+    const onlyOnline = !!(cChk && cChk.checked);
     return { devType, devMode, searchStr, onlyOnline };
   }
+
   const controls = {
-    // refreshBtn 已移除
     typeSelect: () => root.getElementById('fltDevType'),
     modeSelect: () => root.getElementById('fltDevMode'),
     searchInput: () => root.getElementById('fltSearch'),
@@ -156,10 +190,13 @@ export function createTreePanel() {
   };
 
   function escapeHTML(str = '') { return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function deferred(){ let resolve, reject; const promise = new Promise((res, rej)=>{ resolve=res; reject=rej; }); return { promise, resolve, reject }; }
 
   host.setData = setData;
   host.getFilterValues = getFilterValues;
   host.controls = controls;
+  host.whenReady = () => ready.promise;
+  host.isReady = () => isReady;
 
   return host;
 }

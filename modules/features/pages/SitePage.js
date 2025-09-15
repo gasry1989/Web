@@ -1,9 +1,7 @@
 /**
  * SitePage（装配）
- * 修复：
- *  - 树组件宿主占满空间（滚动条可见）
- *  - 分隔条更易拖动（命中 12px + 禁止选中文本）
- *  - 视频打开失败增加超时并释放窗口
+ * 更新：
+ *  - 等待树组件 whenReady() 后再注册筛选监听并调用 bootstrapData，避免首次空引用
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './components/VideoPreview.js';
@@ -21,7 +19,6 @@ import { importTemplate } from '@ui/templateLoader.js';
 
 const SRS_FIXED_URL = 'webrtc://media.szdght.com/1/camera_audio';
 const KEY_TREE_COLLAPSED = 'ui.sitepage.tree.collapsed';
-const PLAY_TIMEOUT_MS = 8000;
 
 let __prevHtmlOverflow = '';
 let __prevBodyOverflow = '';
@@ -52,7 +49,7 @@ export function mountSitePage() {
   fitMainHeight(); window.addEventListener('resize', fitMainHeight);
 
   importTemplate('/modules/features/pages/templates/site-page.html', 'tpl-site-page')
-    .then(frag => {
+    .then(async (frag) => {
       main.appendChild(frag);
       rootEl = main.querySelector('#spRoot');
 
@@ -62,16 +59,17 @@ export function mountSitePage() {
       const statusPanel = rootEl.querySelector('.sp-status');
       const notifyPanel = rootEl.querySelector('.sp-notify');
       const grid = rootEl.querySelector('#mediaGrid');
-
-      // 树组件（关键：宿主参与伸展）
-      tree = createTreePanel();
-      tree.style.flex = '1 1 auto';
-      tree.style.minHeight = '0';
-      leftWrap.appendChild(tree);
-
-      // 折叠/展开：左上按钮 + 悬浮展开柄
       const treeToggleBtn = rootEl.querySelector('#spTreeToggle');
       const treeHandleBtn = rootEl.querySelector('#spTreeHandle');
+
+      // 左树
+      tree = createTreePanel();
+      leftWrap.appendChild(tree);
+
+      // 等待树模板渲染完成后再进行后续初始化，避免空引用
+      try { await (tree.whenReady ? tree.whenReady() : Promise.resolve()); } catch {}
+
+      // 折叠状态
       const initCollapsed = loadCollapsed();
       applyLeftCollapsed(initCollapsed);
 
@@ -87,7 +85,7 @@ export function mountSitePage() {
         try { mapView.resize(); } catch {}
       });
 
-      // 树筛选变化
+      // 监听树筛选变化（防抖）
       const onTreeFiltersChange = debounce(() => { reloadByFilters(); }, 250);
       ['filtersChange','filterchange','filterschange','filters:change'].forEach(evt => {
         try { tree.addEventListener(evt, onTreeFiltersChange); } catch {}
@@ -115,14 +113,14 @@ export function mountSitePage() {
       // 分隔条
       initSplitter(leftWrap, splitter, ()=>{ try{ mapView.resize(); }catch{} });
 
-      // 重置窗口为可用
+      // 重置窗口状态（0→5 顺序）
       for (let i=0;i<mediaSlots.length;i++) {
         mediaSlots[i].type = null; mediaSlots[i].inst = null;
         const body = document.getElementById(`mediaBody${i}`);
         if (body) body.setAttribute('data-free','1');
       }
 
-      // 初次数据
+      // 首次加载（此时树已就绪）
       bootstrapData(statusPanel.querySelector('#summaryChart'), notifyPanel.querySelector('#notifyList'));
     })
     .catch(err => console.error('[SitePage] template load failed', err));
@@ -138,7 +136,7 @@ export function unmountSitePage() {
   if (__prevMainStyle && main) { main.style.padding=__prevMainStyle.padding; main.style.overflow=__prevMainStyle.overflow; main.style.position=__prevMainStyle.position; main.style.height=__prevMainStyle.height; }
 }
 
-/* ---------------- 折叠控制 ---------------- */
+/* ---------------- 左侧树折叠 ---------------- */
 function applyLeftCollapsed(flag){
   const leftWrap = document.getElementById('spLeft');
   const root = document.getElementById('spRoot');
@@ -166,7 +164,7 @@ function applyLeftCollapsed(flag){
 function loadCollapsed(){ try{ return localStorage.getItem(KEY_TREE_COLLAPSED) === '1'; } catch { return false; } }
 function saveCollapsed(v){ try{ localStorage.setItem(KEY_TREE_COLLAPSED, v?'1':'0'); } catch {} }
 
-/* ---------------- 数据装配 ---------------- */
+/* ---------------- 数据装配（同步 filters 到 siteState） ---------------- */
 async function bootstrapData(summaryEl, notifyEl) {
   try {
     const [types, modes, online, summary] = await Promise.all([ apiDevTypes(), apiDevModes(), apiOnlineList(), apiDeviceSummary() ]);
@@ -193,18 +191,28 @@ async function bootstrapData(summaryEl, notifyEl) {
     console.error('[Site] bootstrapData error', e);
   }
 }
+
+// 根据当前树筛选刷新树与地图
 async function reloadByFilters() {
   try {
     const filters = getFiltersFromTree();
     try { siteState.set({ filters }); } catch {}
+
     const [grouped, ungrouped] = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
-    tree.setData({ groupedDevices: grouped.devList || [], ungroupedDevices: ungrouped.devList || [], expandLevel: 2 });
+
+    tree.setData({
+      groupedDevices: grouped.devList || [],
+      ungroupedDevices: ungrouped.devList || [],
+      expandLevel: 2
+    });
+
     const all = [...(grouped.devList||[]), ...(ungrouped.devList||[])];
     mapView.setMarkers(all);
   } catch (e) {
     console.error('[Site] reloadByFilters error', e);
   }
 }
+
 function renderSummary(el, summary) {
   const list = summary?.stateList || [];
   el.innerHTML = list.map(item => {
@@ -235,7 +243,7 @@ function initSplitter(leftWrap, splitter, onDrag) {
     const glass = document.createElement('div');
     Object.assign(glass.style, {
       position:'fixed', inset:'0', cursor:'col-resize', zIndex:'2147483646',
-      background:'transparent', userSelect:'none'  // 防止选中文本卡顿
+      background:'transparent', userSelect:'none'
     });
     document.body.appendChild(glass);
 
@@ -285,13 +293,7 @@ async function openVideoInSlot(devId, devNo) {
   body.setAttribute('data-free','0');
   title.textContent = `${devNo} 视频`;
   mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp;
-
-  try {
-    await withTimeout(vp.play(SRS_FIXED_URL), PLAY_TIMEOUT_MS);
-  } catch {
-    eventBus.emit('toast:show', { type:'error', message:'视频打开失败' });
-    closeSlot(idx);
-  }
+  try { await vp.play(SRS_FIXED_URL); } catch { eventBus.emit('toast:show', { type:'error', message:'拉流失败' }); closeSlot(idx); }
 }
 function openModeInSlot(devId, devNo, modeId) {
   const idx = findFreeSlot();
@@ -318,17 +320,10 @@ function closeSlot(idx) {
 }
 
 /* ---------------- 工具 ---------------- */
-function withTimeout(promise, ms){
-  return new Promise((resolve, reject) => {
-    let timer = setTimeout(()=> reject(new Error('timeout')), ms);
-    promise.then(v => { clearTimeout(timer); resolve(v); })
-           .catch(e => { clearTimeout(timer); reject(e); });
-  });
-}
 function debounce(fn, wait=300) { let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; }
 function getFiltersFromTree(){
-  const { devType, devMode, searchStr, onlyOnline } = tree.getFilterValues();
-  return { devType, devMode, filterOnline: !!onlyOnline, searchStr };
+  // TreePanel.getFilterValues 内部已做兜底，这里直接调用
+  return tree.getFilterValues();
 }
 function escapeHTML(str=''){return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmt(ts){ if(!ts) return ''; const d=new Date(ts); const p=n=>n<10?'0'+n:n; return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
