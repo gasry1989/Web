@@ -20,7 +20,6 @@
   }
   </script>
   <link rel="icon" href="./favicon.ico" />
-  <!-- 全局最小样式（布局/头部/侧栏/Modal/Toast）。其余页面、弹窗、组件样式都在各自模板 HTML 内 -->
   <style>
     :root {
       --color-bg:#0d1216;
@@ -65,7 +64,14 @@
 
     .main-view{flex:1; padding:16px; overflow:auto;}
 
-    /* 侧栏折叠按钮（修复“只显示一半”） */
+    /* 统一主内容区域滚动条（含水平条） */
+    .main-view { scrollbar-width: thin; scrollbar-color:#33424d #141b20; }
+    .main-view::-webkit-scrollbar { width:10px; height:10px; }
+    .main-view::-webkit-scrollbar-track { background:#141b20; }
+    .main-view::-webkit-scrollbar-thumb { background:#33424d; border-radius:6px; }
+    .main-view::-webkit-scrollbar-thumb:hover { background:#415464; }
+
+    /* 侧栏折叠按钮 */
     #sidebarToggle{
       position:absolute; top:6px; right:6px; width:24px; height:24px; user-select:none;
       background:#12181d; border:1px solid var(--color-border); border-radius:4px;
@@ -93,7 +99,7 @@
     .modal__footer{padding:12px 16px 14px; border-top:1px solid #2c333a; text-align:right; display:flex; gap:8px; justify-content:flex-end;}
     .modal-open{overflow:hidden;}
 
-    /* Toast（供 @ui/toast.js 使用） */
+    /* Toast */
     #globalToastContainer{
       position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:9999;
       width:auto; max-width:60vw; display:flex; flex-direction:column; align-items:stretch; gap:8px; pointer-events:none;
