@@ -1,15 +1,12 @@
 /**
- * 音频模式（modeId=3）— 只渲染，不发 WS/不定时
- * - 绘图区下移，柱顶数字不裁剪
- * - 最小柱宽 8px，适配 0~5 台
- * - 无设备时显示“无探头”
+ * 音频模式（modeId=3）
+ * - 0~12 根柱；当通过 ?mockCount=12 固定为 12 根时，仍能完整显示
+ * - 减小四周 padding 与字号，12 根柱全部可见
  */
 export function createModeAudio({ devId } = {}) {
-  const TAG = `[ModeAudio#${devId ?? '-'}]`;
+  const MAX_BARS = 12;
   const host = document.createElement('div');
   const root = host.attachShadow({ mode: 'open' });
-
-  console.info(TAG, 'create');
 
   let cv = null, ctx = null, emptyEl = null;
   const tplReady = (async () => {
@@ -20,9 +17,8 @@ export function createModeAudio({ devId } = {}) {
     cv = root.getElementById('cv');
     emptyEl = root.getElementById('empty');
     ctx = cv.getContext('2d');
-    draw(); // 初始清屏
+    draw();
     window.addEventListener('resize', draw);
-    console.info(TAG, 'template loaded');
   })();
 
   let state = { labels: [], values: [], batteries: [] };
@@ -42,42 +38,48 @@ export function createModeAudio({ devId } = {}) {
     const W = cv.width, H = cv.height;
     ctx.clearRect(0, 0, W, H);
 
-    const padL = 36 * dpr, padR = 20 * dpr, padT = 16 * dpr, padB = 36 * dpr;
+    const n = state.values.length|0;
+    // 更小的边距与字号（针对 12 根柱优化）
+    const fsAxis = 9 * dpr;
+    const fsBarNum = 9 * dpr;
+    const fsXLabel = 10 * dpr;
+
+    const padL = 26 * dpr, padR = 10 * dpr, padT = 8 * dpr, padB = 22 * dpr;
     const plotW = W - padL - padR, plotH = H - padT - padB;
 
-    // 框与网格
+    // 边框与水平网格线
     ctx.strokeStyle = 'rgba(255,255,255,0.7)';
     ctx.lineWidth = 1 * dpr;
     ctx.beginPath(); ctx.rect(padL, padT, plotW, plotH); ctx.stroke();
 
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.font = `${12 * dpr}px Segoe UI,Arial`;
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.font = `${fsAxis}px Segoe UI,Arial`;
     for (let y = 0; y <= 100; y += 20) {
       const yy = padT + plotH - (y / 100) * plotH;
       ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + plotW, yy); ctx.stroke();
-      ctx.globalAlpha = 1; ctx.fillText(String(y), padL - 6 * dpr, yy);
+      ctx.globalAlpha = 1; ctx.fillText(String(y), padL - 5 * dpr, yy);
     }
 
-    const n = state.values.length|0;
-    if (!n) return; // 无柱时仅显示坐标框，"无探头"由 overlay 呈现
+    if (!n) return;
 
-    const gap = Math.max(6 * dpr, plotW / (n * 4));
-    const barW = Math.min(40 * dpr, Math.max(8 * dpr, (plotW - gap * (n + 1)) / n));
+    // 间距与柱宽（12 根也可排下）
+    const gap = Math.max(2 * dpr, plotW / (n * 16));
+    const barW = Math.max(5 * dpr, Math.min(24 * dpr, (plotW - gap * (n + 1)) / n));
     let x = padL + gap;
 
-    ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.font = `${12 * dpr}px Segoe UI,Arial`;
+    ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.font = `${fsBarNum}px Segoe UI,Arial`;
     for (let i = 0; i < n; i++) {
       const v = Math.max(0, Math.min(100, Number(state.values[i]) || 0));
       const h = (v / 100) * plotH;
       const bx = x, by = padT + plotH - h;
 
-      // 柱
+      // 柱子
       ctx.fillStyle = '#fff';
       ctx.fillRect(bx, by, barW, h);
 
-      // 智能数字位置
-      const topOutsideY = by - 4 * dpr;
+      // 顶部数字：越界则柱内显示
+      const topOutsideY = by - 2 * dpr;
       const topInsideY = Math.max(by + 2 * dpr, padT + 2 * dpr);
-      const useInside = (by < padT + 14 * dpr);
+      const useInside = (by < padT + 11 * dpr);
       ctx.fillStyle = '#fff';
       ctx.textBaseline = useInside ? 'top' : 'bottom';
       ctx.fillText(String(Math.round(v)), bx + barW / 2, useInside ? topInsideY : topOutsideY);
@@ -85,19 +87,19 @@ export function createModeAudio({ devId } = {}) {
       x += barW + gap;
     }
 
-    // X 标签与电量绿块
+    // X 轴标签与电量
     x = padL + gap;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#fff'; ctx.font = `${14 * dpr}px Segoe UI,Arial`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#fff'; ctx.font = `${fsXLabel}px Segoe UI,Arial`;
     for (let i = 0; i < n; i++) {
       const label = state.labels[i] != null ? String(state.labels[i]) : String(i + 1);
-      ctx.fillText(label, x + barW / 2, padT + plotH + 6 * dpr);
+      ctx.fillText(label, x + barW / 2, padT + plotH + 3 * dpr);
 
       const p = Math.max(0, Math.min(100, Number(state.batteries[i]) || 0));
-      const ew = Math.max(12 * dpr, Math.min(barW, 26 * dpr));
+      const ew = Math.max(9 * dpr, Math.min(barW, 18 * dpr));
       const ex = x + (barW - ew) / 2;
-      const ey = padT + plotH + 20 * dpr;
-      ctx.fillStyle = '#2eff67'; ctx.fillRect(ex, ey, ew * (p / 100), 6 * dpr);
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.strokeRect(ex, ey, ew, 6 * dpr);
+      const ey = padT + plotH + 16 * dpr;
+      ctx.fillStyle = '#2eff67'; ctx.fillRect(ex, ey, ew * (p / 100), 4 * dpr);
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.strokeRect(ex, ey, ew, 4 * dpr);
 
       x += barW + gap;
     }
@@ -105,25 +107,21 @@ export function createModeAudio({ devId } = {}) {
 
   async function setData(d) {
     await tplReady;
-    const labels = Array.isArray(d?.labels) ? d.labels : Array.from({ length: (d?.values?.length || 0) }, (_, i) => i + 1);
-    const values = Array.isArray(d?.values) ? d.values : [];
-    const batteries = Array.isArray(d?.batteries) ? d.batteries : new Array(d?.values?.length || 0).fill(100);
+    const labels = Array.isArray(d?.labels) ? d.labels.slice(0, MAX_BARS) : Array.from({ length: (d?.values?.length || 0) }, (_, i) => i + 1);
+    const values = Array.isArray(d?.values) ? d.values.slice(0, MAX_BARS) : [];
+    const batteries = Array.isArray(d?.batteries) ? d.batteries.slice(0, MAX_BARS) : new Array(values.length).fill(100);
 
-    state = { labels, values, batteries };
-    if (emptyEl) emptyEl.style.display = (values.length === 0) ? 'flex' : 'none';
+    const n = Math.min(labels.length, values.length, batteries.length);
+    state = { labels: labels.slice(0,n), values: values.slice(0,n), batteries: batteries.slice(0,n) };
+    if (emptyEl) emptyEl.style.display = (n === 0) ? 'flex' : 'none';
 
-    console.info(TAG, 'setData bars:', state.values.length, 'first:', state.values[0]);
-    if (!rafPending) {
-      rafPending = true;
-      requestAnimationFrame(() => { rafPending = false; draw(); });
-    }
+    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; draw(); }); }
   }
 
-  function start() { console.info(TAG, 'start (no timers, wait external feed)'); }
+  function start() {}
   function destroy() {
     try { window.removeEventListener('resize', draw); } catch {}
     try { host.remove(); } catch {}
-    console.info(TAG, 'destroy');
   }
 
   return { el: host, start, setData, destroy, __devId: devId, __modeId: 3 };

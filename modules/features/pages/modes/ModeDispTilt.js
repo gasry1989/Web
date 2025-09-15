@@ -1,27 +1,65 @@
 /**
- * 位移·倾角模式（modeId=2）— 只渲染，不发 WS/不定时
- * - 无设备时显示“无探头”
- * - 去掉倾角行下的绿色波纹，仅显示数值
+ * 位移·倾角模式（modeId=2）
+ * - 用 Grid（grid-auto-rows:1fr + row-gap:1px）消除底部留白
+ * - 行内列布局 + column-gap，宽度变化时等间距挤压
+ * - 编号圆更小、1px 细边，跟随视觉行高缩放
  */
 export function createModeDispTilt({ devId } = {}) {
-  const TAG = `[ModeDispTilt#${devId ?? '-'}]`;
+  const MAX_ITEMS = 12;
   const host = document.createElement('div');
+  host.style.alignSelf = 'stretch';
+  host.style.width = '100%';
+  host.style.height = '100%';
+
   const root = host.attachShadow({ mode: 'open' });
 
-  console.info(TAG, 'create');
+  let wrapEl = null, listEl = null, emptyEl = null, ro = null;
 
-  let listEl = null, emptyEl = null;
   const tplReady = (async () => {
     const html = await fetch('/modules/features/pages/modes/mode-disp-tilt.html', { cache: 'no-cache' }).then(r => r.text());
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const frag = doc.querySelector('#tpl-mode-disp-tilt').content.cloneNode(true);
     root.appendChild(frag);
+    wrapEl = root.querySelector('.wrap');
     listEl = root.getElementById('list');
     emptyEl = root.getElementById('empty');
-    console.info(TAG, 'template loaded');
+
+    ro = new ResizeObserver(()=> applySizing());
+    ro.observe(wrapEl);
+    applySizing();
   })();
 
-  const ICON_SIREN = '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="#fff" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M5 12a7 7 0 0 1 7-7M19 12a7 7 0 0 0-7 7"/><path d="M2.5 12a9.5 9.5 0 0 1 9.5-9.5M21.5 12A9.5 9.5 0 0 0 12 21.5"/></g></svg>';
+  const ICON_SIREN = '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="#fff" stroke-width="1.0"><circle cx="12" cy="12" r="4"/><path d="M5 12a7 7 0 0 1 7-7M19 12a7 7 0 0 0-7 7"/><path d="M2.5 12a9.5 9.5 0 0 1 9.5-9.5M21.5 12A9.5 9.5 0 0 0 12 21.5"/></g></svg>';
+
+  function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+
+  function applySizing() {
+    if (!wrapEl) return;
+    const H = wrapEl.getBoundingClientRect().height;
+    const n = Math.max(1, Math.min(MAX_ITEMS, listEl?.children?.length || MAX_ITEMS));
+    const gapY = 1;
+    const rowH = (H - gapY * (n - 1)) / n;
+
+    const fs = clamp(rowH * 0.40, 8, 15);
+    const icon = clamp(rowH * 0.56, 10, 18);
+    const badgeD = clamp(rowH * 0.62, 14, rowH - 2);
+    const badgeFS = clamp(badgeD * 0.56, 7.5, 12);
+    const battH = clamp(rowH * 0.34, 6, 12);
+    const battW = clamp(rowH * 1.30, 24, 44);
+    const capW = clamp(battH * 0.38, 2.5, 5.5);
+    const capH = clamp(battH * 0.78, 3, 8);
+    const hgap = clamp(rowH * 0.35, 6, 14);
+
+    host.style.setProperty('--fs', fs + 'px');
+    host.style.setProperty('--icon', icon + 'px');
+    host.style.setProperty('--badge-d', badgeD + 'px');
+    host.style.setProperty('--badge-fs', badgeFS + 'px');
+    host.style.setProperty('--batt-h', battH + 'px');
+    host.style.setProperty('--batt-w', battW + 'px');
+    host.style.setProperty('--cap-w', capW + 'px');
+    host.style.setProperty('--cap-h', capH + 'px');
+    host.style.setProperty('--hgap', hgap + 'px');
+  }
 
   function makeRow() {
     const row = document.createElement('div'); row.className = 'row';
@@ -46,7 +84,7 @@ export function createModeDispTilt({ devId } = {}) {
       listEl.innerHTML = '';
       rows = items.map(() => makeRow());
       rows.forEach(r => listEl.appendChild(r.row));
-      console.info(TAG, 'rows rebuilt:', rows.length);
+      applySizing();
     }
     for (let i = 0; i < n; i++) {
       const it = items[i], r = rows[i];
@@ -56,19 +94,17 @@ export function createModeDispTilt({ devId } = {}) {
       r.fill.style.transform = `scaleX(${p})`;
       r.siren.style.opacity = it.sirenOn === false ? 0.3 : 0.95;
       r.val.textContent = String(it.valueText || '');
-      // 不再加波纹
     }
   }
 
   async function setData(data) {
     await tplReady;
-    const items = Array.isArray(data?.items) ? data.items : [];
-    console.info(TAG, 'setData items:', items.length, items[0] || '');
+    const items = Array.isArray(data?.items) ? data.items.slice(0, MAX_ITEMS) : [];
     render(items);
   }
 
-  function start() { console.info(TAG, 'start (no timers, wait external feed)'); }
-  function destroy() { try { host.remove(); } catch {} console.info(TAG, 'destroy'); }
+  function start() {}
+  function destroy() { try { ro?.disconnect(); } catch {} try { host.remove(); } catch {} }
 
   return { el: host, start, setData, destroy, __devId: devId, __modeId: 2 };
 }
