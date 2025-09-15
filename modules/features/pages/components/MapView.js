@@ -2,8 +2,11 @@
  * MapView（基于 iframe 的地图容器）
  * 外部 API：mount/setMarkers/openDevice/setCenter/resize/destroy
  * 外部事件：markerClick/openVideo/openMode/refreshDevice/openDetail
+ * 变更：
+ *  - 自动读取 window.__AMAP_KEY 与 window.__AMAP_SECURITY_JS_CODE
+ *  - 在 init 消息中把 securityJsCode 一并下发，iframe 将在加载 SDK 之前注入
  */
-export function createMapView({ amapKey, debug = true } = {}) {
+export function createMapView({ amapKey, securityJsCode, debug = true } = {}) {
   const host = document.createElement('div');
   Object.assign(host.style, { display: 'block', width: '100%', height: '100%' });
   const shadow = host.attachShadow({ mode: 'open' });
@@ -38,6 +41,12 @@ export function createMapView({ amapKey, debug = true } = {}) {
     const meta = document.querySelector('meta[name="amap-key"]'); if (meta?.content) return String(meta.content).trim();
     return '';
   }
+  function resolveSec() {
+    if (securityJsCode && String(securityJsCode).trim()) return String(securityJsCode).trim();
+    try { if (window.__AMAP_SECURITY_JS_CODE) return String(window.__AMAP_SECURITY_JS_CODE).trim(); } catch {}
+    const meta = document.querySelector('meta[name="amap-security"]'); if (meta?.content) return String(meta.content).trim();
+    return '';
+  }
 
   function postToFrame(msg) {
     if (destroyed) return;
@@ -57,6 +66,7 @@ export function createMapView({ amapKey, debug = true } = {}) {
 
   function mount() {
     const key = resolveKey();
+    const sec = resolveSec();
     if (!key) { showHint('缺少高德 Key（AMAP_KEY）'); warn('缺少高德 Key（AMAP_KEY）'); }
 
     iframe.src = `/modules/features/pages/components/templates/map-view-frame.html`;
@@ -106,7 +116,7 @@ export function createMapView({ amapKey, debug = true } = {}) {
 
     iframe.addEventListener('load', () => {
       try {
-        iframe.contentWindow?.postMessage({ __mv:true, t:'init', key, debug: !!debug }, '*');
+        iframe.contentWindow?.postMessage({ __mv:true, t:'init', key, debug: !!debug, securityJsCode: sec }, '*');
       } catch {}
     }, { once: true });
   }

@@ -73,6 +73,15 @@
     .dt-4{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%23404a57"/><path d="M20 20h24v24H20z" fill="%23cfd8dc"/></svg>');}
 
     .addr-text{color:#e6f0ff;}
+    /* 地址行：按钮在左，文本在右；文本可换行，整体可增高 */
+    .ov-row-addr{ align-items:flex-start; }
+    .ov-row-addr .addr-text{
+      flex:1 1 200px;
+      white-space:normal;
+      overflow-wrap:anywhere;
+      word-break:break-word;
+      line-height:1.6;
+    }
   </style>
 </head>
 <body>
@@ -80,6 +89,7 @@
   <script>
     (function(){
       var AMAP_KEY = '';
+      var SECURITY_JS_CODE = '';
       var debug = false;
 
       var log=function(){ if(debug) try{ console.info.apply(console, ["[MapView-IFRAME]"].concat([].slice.call(arguments))); }catch(e){} };
@@ -91,6 +101,11 @@
       function ensureAMap(cb){
         if(!AMAP_KEY){ post({t:"error",message:"缺少高德 Key（AMAP_KEY）"}); return; }
         if(window.AMap){ cb&&cb(); return; }
+        try{
+          if (SECURITY_JS_CODE) {
+            window._AMapSecurityConfig = { securityJsCode: SECURITY_JS_CODE };
+          }
+        }catch(e){}
         var s=document.createElement("script");
         s.src="https://webapi.amap.com/maps?v=2.0&key="+encodeURIComponent(AMAP_KEY);
         s.onload=function(){ cb&&cb(); };
@@ -141,11 +156,11 @@
         log("markers set", cnt);
       }
 
-      function lockSizeOnce(el){
+      // 仅锁定宽度，不锁定高度，保证内容增长时整体可变高
+      function lockWidth(el){
         try{
           var r=el.getBoundingClientRect();
           el.style.width=Math.round(r.width)+"px";
-          el.style.height=Math.round(r.height)+"px";
         }catch(e){}
       }
 
@@ -233,6 +248,7 @@
             + '</div>'
           + '</div>'
           + '<div class="ov-bd">'
+            <!-- 位置行：右侧刷新图标 -->
             + '<div class="ov-row">'
               + '<label>位置：</label>'
               + '<span class="mono" style="flex:1 1 auto;min-width:120px;">'+ escapeHtml(posText) +'</span>'
@@ -262,9 +278,11 @@
         if(!infoWindow) infoWindow=new AMap.InfoWindow({ isCustom:true, offset:new AMap.Pixel(0,-20), closeWhenClickMap:true });
         infoWindow.setContent(w); infoWindow.open(map,pos);
 
-        setTimeout(function(){ lockSizeOnce(w); }, 0);
-        setTimeout(function(){ lockSizeOnce(w); }, 60);
+        // 仅锁定宽度，允许内容拉高
+        setTimeout(function(){ lockWidth(w); }, 0);
+        setTimeout(function(){ lockWidth(w); }, 60);
 
+        // 信息窗内部也不产生选区
         w.addEventListener('mousedown', function(){ try{ var s=window.getSelection(); if(s) s.removeAllRanges(); }catch(e){} }, true);
 
         var closeBtn = w.querySelector("#ovCloseBtn");
@@ -289,6 +307,8 @@
                 } else {
                   addrEl.textContent = '未找到地址';
                 }
+                // 地址变长后，确保信息窗按新高度排版
+                try { infoWindow && infoWindow.setContent(w); } catch(e){}
               });
             });
           });
@@ -327,11 +347,13 @@
 
       function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]);}); }
 
+      // 等父页面发来 init 后再加载 SDK（包含 Key 与 SecurityJsCode）
       window.addEventListener("message", function(e){
         var msg=e.data||{}; if(!msg.__mv) return;
         switch(msg.t){
           case "init":
             AMAP_KEY = (msg.key || "").trim();
+            SECURITY_JS_CODE = (msg.securityJsCode || "").trim();
             debug = !!msg.debug;
             ensureAMap(init);
             break;
