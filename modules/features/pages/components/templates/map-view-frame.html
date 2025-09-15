@@ -7,81 +7,12 @@
   <style>
     html,body,#map{height:100%;margin:0;padding:0;background:#0a0f14}
     *{box-sizing:border-box}
-
     html, body, #map,
     .amap-canvas, .amap-layer, .amap-marker, .amap-marker-label,
-    .amap-overlay-text, .amap-info, .ov-wrap, .ov-wrap * {
-      -webkit-user-select: none;
-      -moz-user-select: none;
-      user-select: none;
-      -webkit-touch-callout: none;
-      -webkit-tap-highlight-color: transparent;
-    }
-    img, .amap-marker img { -webkit-user-drag: none; user-drag: none; }
-
-    .ov-wrap{width:420px;background:#111c28;color:#cfd8dc;border:1px solid rgba(255,255,255,.12);border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.5);overflow:hidden;}
-    /* 两行头部布局：左侧大图标，右侧两行内容 */
-    .ov-hd{
-      display:grid;
-      grid-template-columns: 56px 1fr;
-      grid-template-rows:auto auto;
-      gap:8px 10px;
-      padding:10px 12px;
-      border-bottom:1px solid rgba(255,255,255,.08);
-      align-items:center;
-    }
-    .ov-ic{
-      grid-column:1/2; grid-row:1/3;
-      width:56px; height:56px; border-radius:10px;
-      background:#17324a; background-size:70% 70%; background-position:center; background-repeat:no-repeat;
-      border:1px solid rgba(255,255,255,.1);
-    }
-    .ov-row1{ grid-column:2/3; grid-row:1/2; display:flex; align-items:center; gap:10px; min-width:0; }
-    .ov-row2{ grid-column:2/3; grid-row:2/3; display:flex; align-items:center; gap:10px; min-width:0; }
-
-    .ov-name{font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto;}
-    .ov-status{font-size:12px; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.15);}
-    .st-online{background:#11331a;color:#7ef58b;border-color:rgba(126,245,139,.25);}
-    .st-offline{background:#2a2f36;color:#9aa3ab;border-color:rgba(255,255,255,.12);font-size:11px;}
-    .ov-close{background:transparent;border:none;color:#ccd;cursor:pointer;font-size:16px;line-height:1;}
-    .ov-close:hover{color:#fff;}
-
-    .ov-bd{padding:10px 12px;font-size:12px;line-height:1.8;}
-    .ov-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0;}
-    .ov-row label{color:#9fb1bb;white-space:nowrap;min-width:64px;}
-    .ov-row .mono{font-family:ui-monospace,SFMono-Regular,Consolas,Monaco,monospace;}
-
-    .btn{padding:4px 8px;background:#1f497d;border:1px solid rgba(255,255,255,.15);color:#e6f0ff;border-radius:4px;cursor:pointer;}
-    .btn:disabled{opacity:.6;cursor:not-allowed;}
-    .btn-icon{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:4px;background:#203246;border:1px solid rgba(255,255,255,.15);cursor:pointer;}
-    .btn-icon svg{width:16px;height:16px;fill:#e6f0ff;}
-    select{background:#15202a;color:#e6f0ff;border:1px solid rgba(255,255,255,.15);border-radius:4px;padding:3px 6px;}
-
-    /* 电池造型（条形） */
-    .ov-batt{position:relative;flex:0 0 auto;width:62px;height:16px;border:1px solid rgba(255,255,255,.2);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;background:#0f1622;overflow:hidden;}
-    .ov-batt::after{content:'';position:absolute;right:-5px;top:50%;transform:translateY(-50%);width:4px;height:8px;border:1px solid rgba(255,255,255,.2);border-left:none;border-radius:0 2px 2px 0;background:#0f1622;}
-    .ov-batt .batt-fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:2px;}
-    .ov-batt .batt-txt{position:relative;font-size:11px;color:#e8f2ff;}
-    .batt-ok .batt-fill{background:#2dbb69;}
-    .batt-mid .batt-fill{background:#d7a43a;}
-    .batt-low .batt-fill{background:#d45b5b;}
-
-    /* 设备类型图标占位（可替换为真实图片） */
-    .dt-1{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%2322463e"/><circle cx="32" cy="32" r="14" fill="%2396f7d2"/></svg>');}
-    .dt-2{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%23223a69"/><rect x="16" y="18" width="32" height="22" rx="3" fill="%2390c2ff"/><circle cx="32" cy="46" r="5" fill="%23b5d9ff"/></svg>');}
-    .dt-3{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%233b264f"/><path d="M18 46l14-28 14 28z" fill="%23d6b6ff"/></svg>');}
-    .dt-4{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="10" fill="%23404a57"/><path d="M20 20h24v24H20z" fill="%23cfd8dc"/></svg>');}
-
-    .addr-text{color:#e6f0ff;}
-    /* 地址行：按钮在左，文本在右；文本可换行，整体可增高 */
-    .ov-row-addr{ align-items:flex-start; }
-    .ov-row-addr .addr-text{
-      flex:1 1 200px;
-      white-space:normal;
-      overflow-wrap:anywhere;
-      word-break:break-word;
-      line-height:1.6;
-    }
+    .amap-overlay-text, .amap-info { -webkit-user-select:none; -moz-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; }
+    img, .amap-marker img { -webkit-user-drag:none; user-drag:none; }
+    /* 信息窗内部内容是一个 iframe，样式在子页里，这里只控制尺寸容器 */
+    .ov-iframe{display:block; width:420px; height:10px; border:0; background:transparent;}
   </style>
 </head>
 <body>
@@ -97,15 +28,12 @@
       var post=function(msg){ try{ parent.postMessage(Object.assign({__mv:true},msg),"*"); }catch(e){} };
 
       var map=null,markers=[],infoWindow=null,followCenter=false,mounted=false,currentDevInfo=null, geocoder=null;
+      var infoFrame=null, lastDevId=null, infoWindowOpen=false;
 
       function ensureAMap(cb){
         if(!AMAP_KEY){ post({t:"error",message:"缺少高德 Key（AMAP_KEY）"}); return; }
         if(window.AMap){ cb&&cb(); return; }
-        try{
-          if (SECURITY_JS_CODE) {
-            window._AMapSecurityConfig = { securityJsCode: SECURITY_JS_CODE };
-          }
-        }catch(e){}
+        try{ if (SECURITY_JS_CODE) window._AMapSecurityConfig = { securityJsCode: SECURITY_JS_CODE }; }catch(e){}
         var s=document.createElement("script");
         s.src="https://webapi.amap.com/maps?v=2.0&key="+encodeURIComponent(AMAP_KEY);
         s.onload=function(){ cb&&cb(); };
@@ -156,33 +84,48 @@
         log("markers set", cnt);
       }
 
-      // 仅锁定宽度，不锁定高度，保证内容增长时整体可变高
-      function lockWidth(el){
-        try{
-          var r=el.getBoundingClientRect();
-          el.style.width=Math.round(r.width)+"px";
-        }catch(e){}
-      }
-
-      function fmtBattery(v){
-        var n = Number.isFinite(v)? Math.max(0, Math.min(100, Math.floor(v))) : 0;
-        var cls = n >= 50 ? 'batt-ok' : (n >= 20 ? 'batt-mid' : 'batt-low');
-        return { n:n, text: n + '%', cls };
-      }
-      function ori(bTrue, posChar){ return bTrue===false ? (posChar==='N'?'S':'W') : posChar; }
+      function lockWidth(el){ try{ var r=el.getBoundingClientRect(); el.style.width=Math.round(r.width)+"px"; }catch(e){} }
       function fmtCoord(lat,lng,isNorth,isEast){
         var latS = (Math.abs(lat).toFixed(6)) + '°';
         var lngS = (Math.abs(lng).toFixed(6)) + '°';
+        function ori(bTrue, posChar){ return bTrue===false ? (posChar==='N'?'S':'W') : posChar; }
         return ori(isNorth,'N') + ' ' + latS + ', ' + ori(isEast,'E') + ' ' + lngS;
       }
-      function typeClassOf(dev){
-        var t = dev && (dev.type!=null ? String(dev.type) : (dev.typeName||''));
-        if (/1$/.test(t)) return 'dt-1';
-        if (/2$/.test(t)) return 'dt-2';
-        if (/3$/.test(t)) return 'dt-3';
-        if (/4$/.test(t)) return 'dt-4';
-        var s=0; String(t).split('').forEach(function(c){ s=(s*131 + c.charCodeAt(0))>>>0; });
-        return 'dt-' + (s%4+1);
+      function buildData(devInfo){
+        var hasLL = !!(devInfo && devInfo.lastLocation && devInfo.lastLocation.lng!=null && devInfo.lastLocation.lat!=null);
+        var posText = hasLL
+          ? (fmtCoord(devInfo.lastLocation.lat, devInfo.lastLocation.lng, devInfo.lastLocation.isNorth, devInfo.lastLocation.isEast)
+             + (devInfo.lastLocation.height!=null? ('   ' + Number(devInfo.lastLocation.height) + 'm'):''))
+          : "无定位数据";
+        var timeText = devInfo.lastLocation ? new Date(devInfo.lastLocation.time).toLocaleString() : "";
+        var speedText = devInfo.lastLocation ? ((devInfo.lastLocation.speed||0) + ' km/h') : '';
+        var modeList = Array.isArray(devInfo.modeList) ? devInfo.modeList : [];
+        var camCount = (devInfo.hardwareInfo && Number(devInfo.hardwareInfo.cameraCount)) || 0;
+        return { devInfo, hasLL, posText, timeText, speedText, modeList, camCount };
+      }
+
+      // 只创建一次 iframe 与 InfoWindow
+      function ensureInfoContent(){
+        if (!infoWindow) infoWindow = new AMap.InfoWindow({ isCustom:true, offset:new AMap.Pixel(0,-20), closeWhenClickMap:false });
+        if (!infoFrame) {
+          var ifr=document.createElement('iframe');
+          ifr.className='ov-iframe';
+          ifr.src='/modules/features/pages/components/templates/map-info-frame.html'; // 固定地址，避免重复加载
+          ifr.addEventListener('load', function(){
+            setTimeout(function(){ lockWidth(ifr); }, 0);
+            setTimeout(function(){ lockWidth(ifr); }, 60);
+          });
+          infoFrame = ifr;
+          infoWindow.setContent(infoFrame); // 仅首次设置内容
+        }
+      }
+
+      function sendDataToChild(){
+        try{
+          if (infoFrame && infoFrame.contentWindow) {
+            infoFrame.contentWindow.postMessage({ __iv:true, t:'setData', data: buildData(currentDevInfo) }, '*');
+          }
+        }catch(e){}
       }
 
       function openDevice(devInfo, followCenterWhenNoLocation){
@@ -197,159 +140,73 @@
           followCenter=!!followCenterWhenNoLocation;
         }
 
-        var battery = fmtBattery(currentDevInfo.battery);
-        var statusCls = currentDevInfo.onlineState ? 'st-online' : 'st-offline';
-        var statusText = currentDevInfo.onlineState ? '在线' : '离线';
-        var tClass = typeClassOf(currentDevInfo);
+        var isSameDev = (lastDevId != null && currentDevInfo && currentDevInfo.id === lastDevId);
+        lastDevId = currentDevInfo ? currentDevInfo.id : null;
 
-        var hasLL = !!(currentDevInfo.lastLocation && currentDevInfo.lastLocation.lng!=null && currentDevInfo.lastLocation.lat!=null);
-        var posText = hasLL
-          ? (fmtCoord(currentDevInfo.lastLocation.lat, currentDevInfo.lastLocation.lng, currentDevInfo.lastLocation.isNorth, currentDevInfo.lastLocation.isEast)
-             + (currentDevInfo.lastLocation.height!=null? ('   ' + Number(currentDevInfo.lastLocation.height) + 'm'):''))
-          : "无定位数据";
-        var timeText = currentDevInfo.lastLocation ? new Date(currentDevInfo.lastLocation.time).toLocaleString() : "";
-        var speedText = currentDevInfo.lastLocation ? ((currentDevInfo.lastLocation.speed||0) + ' km/h') : '';
-
-        var modeList = Array.isArray(currentDevInfo.modeList) ? currentDevInfo.modeList : [];
-        var modeOptions = modeList.map(function(m){
-          var id = (m && (m.modeId!=null ? m.modeId : m.id!=null ? m.id : '')) + '';
-          var name = (m && (m.modeName || m.name)) ? (m.modeName || m.name) : '';
-          return '<option value="'+ id +'">'+ String(name) +'</option>';
-        }).join('');
-
-        var camCount = (currentDevInfo.hardwareInfo && Number(currentDevInfo.hardwareInfo.cameraCount)) || 0;
-        var mediaRowHtml = '';
-        if (camCount > 0) {
-          var streamOpts = camCount >= 2
-            ? '<option value="main">主码流</option><option value="sub">副码流</option>'
-            : '<option value="main">主码流</option>';
-          mediaRowHtml =
-            '<div class="ov-row ov-row-media">'
-              + '<label>媒体流：</label>'
-              + '<select id="ovStreamSel">'+ streamOpts +'</select>'
-              + '<button class="btn" id="btnOpenVideo">打开视频</button>'
-            + '</div>';
+        // 只在首次或切换设备时打开窗口；同一设备刷新只更新数据，不开关窗口、不移动位置
+        ensureInfoContent();
+        if (!infoWindowOpen || !isSameDev) {
+          try{ infoWindow.open(map,pos); infoWindowOpen = true; }catch(e){}
         }
+        sendDataToChild();
 
-        var html =
-          '<div class="ov-hd">'
-            + '<span class="ov-ic '+ tClass +'"></span>'
-            + '<div class="ov-row1">'
-              + '<span class="ov-name">'+ escapeHtml(currentDevInfo.no || String(currentDevInfo.id||"")) +'</span>'
-              + '<div class="ov-batt '+battery.cls+'">'
-                + '<span class="batt-fill" style="width:'+ battery.n +'%;"></span>'
-                + '<span class="batt-txt">'+ battery.text +'</span>'
-              + '</div>'
-              + '<button id="ovCloseBtn" class="ov-close" title="关闭">✕</button>'
-            + '</div>'
-            + '<div class="ov-row2">'
-              + '<span class="ov-status '+statusCls+'">'+ statusText +'</span>'
-              + '<button class="btn" id="btnOpenDetail" style="margin-left:auto;">详情</button>'
-            + '</div>'
-          + '</div>'
-          + '<div class="ov-bd">'
-            <!-- 位置行：右侧刷新图标 -->
-            + '<div class="ov-row">'
-              + '<label>位置：</label>'
-              + '<span class="mono" style="flex:1 1 auto;min-width:120px;">'+ escapeHtml(posText) +'</span>'
-              + '<button class="btn-icon" id="btnRefreshInfo" title="刷新">'
-                + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6a6 6 0 0 1 5.657 4H16l3.5 3.5L23 10h-2.04A8 8 0 1 0 20 16h-2a6 6 0 1 1-6-10z"/></svg>'
-              + '</button>'
-            + '</div>'
-            + (hasLL
-              ? ('<div class="ov-row ov-row-addr">'
-                  + '<label></label>'
-                  + '<button class="btn" id="btnShowAddr">显示地址</button>'
-                  + '<span id="addrText" class="addr-text"></span>'
-                 + '</div>')
-              : '')
-            + '<div class="ov-row"><label>定位时间：</label><span>'+ escapeHtml(timeText) +'</span><label style="margin-left:16px;min-width:auto;">速度：</label><span>'+ escapeHtml(speedText) +'</span></div>'
-            + mediaRowHtml
-            + (modeList.length>0
-              ? ('<div class="ov-row">'
-                  + '<label>设备模式：</label>'
-                  + '<select id="ovModeSel">'+ modeOptions +'</select>'
-                  + '<button class="btn" id="btnOpenMode">打开模式</button>'
-                 + '</div>')
-              : '')
-          + '</div>';
-
-        var w=document.createElement("div"); w.className="ov-wrap"; w.innerHTML = html;
-        if(!infoWindow) infoWindow=new AMap.InfoWindow({ isCustom:true, offset:new AMap.Pixel(0,-20), closeWhenClickMap:true });
-        infoWindow.setContent(w); infoWindow.open(map,pos);
-
-        // 仅锁定宽度，允许内容拉高
-        setTimeout(function(){ lockWidth(w); }, 0);
-        setTimeout(function(){ lockWidth(w); }, 60);
-
-        // 信息窗内部也不产生选区
-        w.addEventListener('mousedown', function(){ try{ var s=window.getSelection(); if(s) s.removeAllRanges(); }catch(e){} }, true);
-
-        var closeBtn = w.querySelector("#ovCloseBtn");
-        closeBtn && closeBtn.addEventListener("click",function(){ try{ infoWindow&&infoWindow.close(); }catch(e){} });
-
-        var btnRefresh = w.querySelector("#btnRefreshInfo");
-        if (btnRefresh) {
-          btnRefresh.addEventListener("click",function(){ post({ t:"refreshDevice", devId: currentDevInfo.id }); });
-        }
-
-        var btnShowAddr = w.querySelector("#btnShowAddr");
-        if (btnShowAddr && hasLL) {
-          btnShowAddr.addEventListener("click", function(){
-            var addrEl = w.querySelector('#addrText');
-            if (!addrEl) return;
-            addrEl.textContent = '解析中...';
-            ensureGeocoder(function(){
-              if (!geocoder) { addrEl.textContent = '逆地理失败'; return; }
-              geocoder.getAddress([currentDevInfo.lastLocation.lng, currentDevInfo.lastLocation.lat], function(status, result){
-                if (status === 'complete' && result && result.regeocode && result.regeocode.formattedAddress) {
-                  addrEl.textContent = result.regeocode.formattedAddress;
-                } else {
-                  addrEl.textContent = '未找到地址';
-                }
-                // 地址变长后，确保信息窗按新高度排版
-                try { infoWindow && infoWindow.setContent(w); } catch(e){}
-              });
-            });
-          });
-        }
-
-        var btnVideo = w.querySelector("#btnOpenVideo");
-        if (btnVideo) {
-          btnVideo.addEventListener("click",function(){
-            var streamSelEl = w.querySelector('#ovStreamSel');
-            var streamType = streamSelEl ? String(streamSelEl.value || 'main') : 'main';
-            post({ t:"openVideo", devId: currentDevInfo.id, devNo: currentDevInfo.no, cameraIndex: 1, streamType });
-          });
-        }
-
-        var btnMode = w.querySelector("#btnOpenMode");
-        if (btnMode) {
-          btnMode.addEventListener("click",function(){
-            var sel=w.querySelector("#ovModeSel");
-            var modeId = sel && sel.value;
-            post({ t:"openMode", devId: currentDevInfo.id, devNo: currentDevInfo.no, modeId: modeId });
-          });
-        }
-
-        var btnDetail = w.querySelector("#btnOpenDetail");
-        if (btnDetail) {
-          btnDetail.addEventListener("click", function(){
-            post({ t:"openDetail", devId: currentDevInfo.id, devNo: currentDevInfo.no });
-          });
-        }
-
-        log("openDevice", pos);
+        log("openDevice", { devId: currentDevInfo && currentDevInfo.id, same:isSameDev, opened:infoWindowOpen });
       }
 
       function setCenter(lng,lat){ try{ map&&map.setCenter([lng,lat]); }catch(e){} }
       function resize(){ try{ map&&map.resize(); }catch(e){} }
 
-      function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]);}); }
+      // 父(本页)与子(信息窗 iframe)通信
+      window.addEventListener('message', function(e){
+        var msg=e.data||{};
+        // 子 iframe -> 父
+        if (msg && msg.__iv && e.source === (infoFrame && infoFrame.contentWindow)) {
+          switch(msg.t){
+            case 'ready':
+              sendDataToChild();
+              break;
+            case 'height':
+              if (infoFrame) {
+                try{
+                  infoFrame.style.height = Math.max(10, Number(msg.h||0)) + 'px';
+                  // 不再 setContent，避免闪
+                }catch(e){}
+              }
+              break;
+            case 'close':
+              try{ infoWindow && infoWindow.close(); infoWindowOpen=false; }catch(e){}
+              break;
+            case 'openDetail':
+              post({ t:'openDetail', devId: msg.devId, devNo: msg.devNo });
+              break;
+            case 'refreshDevice': // 子页点刷新：仅向上抛事件，父层拉数据后再次调用 openDevice 即可（不会闪）
+              post({ t:'refreshDevice', devId: msg.devId });
+              break;
+            case 'openVideo':
+              post({ t:'openVideo', devId: msg.devId, devNo: msg.devNo, cameraIndex: msg.cameraIndex, streamType: msg.streamType });
+              break;
+            case 'openMode':
+              post({ t:'openMode', devId: msg.devId, devNo: msg.devNo, modeId: msg.modeId });
+              break;
+            case 'req_show_addr':
+              ensureGeocoder(function(){
+                if (!geocoder) {
+                  try{ infoFrame.contentWindow.postMessage({ __iv:true, t:'res_addr', text:'逆地理失败' }, '*'); }catch(e){}
+                  return;
+                }
+                geocoder.getAddress([msg.lng, msg.lat], function(status, result){
+                  var text = (status === 'complete' && result && result.regeocode && result.regeocode.formattedAddress)
+                    ? result.regeocode.formattedAddress : '未找到地址';
+                  try{ infoFrame.contentWindow.postMessage({ __iv:true, t:'res_addr', text: text }, '*'); }catch(e){}
+                });
+              });
+              break;
+          }
+          return;
+        }
 
-      // 等父页面发来 init 后再加载 SDK（包含 Key 与 SecurityJsCode）
-      window.addEventListener("message", function(e){
-        var msg=e.data||{}; if(!msg.__mv) return;
+        // 父(上层) -> 本页
+        if(!msg.__mv) return;
         switch(msg.t){
           case "init":
             AMAP_KEY = (msg.key || "").trim();
