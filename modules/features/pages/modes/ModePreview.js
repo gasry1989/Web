@@ -6,7 +6,7 @@ export function createModePreview({ modeId, devId } = {}) {
   const root = host.attachShadow({ mode: 'open' });
 
   (async () => {
-    const frag = await (await fetch('/modules/features/pages/components/mode-preview.html', { cache: 'no-cache' })
+    const frag = await (await fetch('/modules/features/pages/modes/mode-preview.html', { cache: 'no-cache' })
       .then(r=>r.text()).then(t=> new DOMParser().parseFromString(t, 'text/html')))
       .querySelector('#tpl-mode-preview').content.cloneNode(true);
     root.appendChild(frag);

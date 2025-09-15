@@ -14,7 +14,7 @@ export function createVideoPreview({ objectFit = 'fill' } = {}) {
   function log(...a){ try{ console.info('[VideoPreview]', ...a);}catch{} }
 
   // 模板准备
-  const tplReady = importTemplate('/modules/features/pages/components/video-preview.html', 'tpl-video-preview')
+  const tplReady = importTemplate('/modules/features/pages/modes/video-preview.html', 'tpl-video-preview')
     .then(frag => {
       root.appendChild(frag);
       canvas = root.getElementById('vpCanvas');

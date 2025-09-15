@@ -4,8 +4,8 @@
  *  - 等待树组件 whenReady() 后再注册筛选监听并调用 bootstrapData，避免首次空引用
  */
 import { createTreePanel } from './components/TreePanel.js';
-import { createVideoPreview } from './components/VideoPreview.js';
-import { createModePreview } from './components/ModePreview.js';
+import { createVideoPreview } from './modes/VideoPreview.js';
+import { createModePreview } from './modes/ModePreview.js';
 import { createMapView } from './components/MapView.js';
 import { ENV } from '/config/env.js'; // 统一从 /config/env.js 获取 AMAP_KEY
 import { siteState } from '@state/siteState.js';
