@@ -16,7 +16,7 @@ export async function showPasswordModal(user) {
   // 载入模板
   let frag;
   try {
-    frag = await importTemplate('/modules/features/pages/modals/templates/password-modal.html', 'tpl-password-modal');
+    frag = await importTemplate('/modules/features/pages/modals/password-modal.html', 'tpl-password-modal');
   } catch (e) {
     console.error('[PasswordModal] template load failed', e);
     return;

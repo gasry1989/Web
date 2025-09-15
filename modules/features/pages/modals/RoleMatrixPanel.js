@@ -19,7 +19,7 @@ export async function showRoleMatrixPanel(roles) {
   let frag;
   try {
     // 确保 .html 后缀路径正确
-    frag = await importTemplate('/modules/features/pages/modals/templates/role-matrix-panel.html', 'tpl-role-matrix-panel');
+    frag = await importTemplate('/modules/features/pages/modals/role-matrix-panel.html', 'tpl-role-matrix-panel');
   } catch (e) {
     console.error('[RoleMatrixPanel] template load failed', e);
     return;

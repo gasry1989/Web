@@ -48,7 +48,7 @@ export function mountSitePage() {
   };
   fitMainHeight(); window.addEventListener('resize', fitMainHeight);
 
-  importTemplate('/modules/features/pages/templates/site-page.html', 'tpl-site-page')
+  importTemplate('/modules/features/pages/site-page.html', 'tpl-site-page')
     .then(async (frag) => {
       main.appendChild(frag);
       rootEl = main.querySelector('#spRoot');

@@ -23,7 +23,7 @@ export function mountUserListPage() {
   main.innerHTML = '<div id="usersPageMount"></div>';
   const mountPoint = main.querySelector('#usersPageMount');
 
-  importTemplate('/modules/features/pages/templates/users-page.html', 'tpl-users-page')
+  importTemplate('/modules/features/pages/users-page.html', 'tpl-users-page')
     .then(frag => {
       mountPoint.innerHTML = '';
       mountPoint.appendChild(frag);

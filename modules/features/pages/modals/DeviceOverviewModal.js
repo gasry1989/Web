@@ -41,7 +41,7 @@ export async function showDeviceOverviewModal(opt={}) {
 
   let frag;
   try {
-    frag = await importTemplate('/modules/features/pages/modals/templates/device-overview-modal.html', 'tpl-device-overview-modal');
+    frag = await importTemplate('/modules/features/pages/modals/device-overview-modal.html', 'tpl-device-overview-modal');
   } catch (e) {
     console.error('[DeviceOverviewModal] template load failed', e);
     return;

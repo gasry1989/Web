@@ -30,7 +30,7 @@ export async function showAddUserModal() {
 
   let frag;
   try {
-    frag = await importTemplate('/modules/features/pages/modals/templates/add-user-modal.html', 'tpl-add-user-modal');
+    frag = await importTemplate('/modules/features/pages/modals/add-user-modal.html', 'tpl-add-user-modal');
   } catch (e) {
     console.error('[AddUserModal] template load failed', e);
     return;

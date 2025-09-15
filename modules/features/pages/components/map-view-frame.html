@@ -107,7 +107,7 @@
         if (!infoFrame) {
           var ifr=document.createElement('iframe');
           ifr.className='ov-iframe';
-          ifr.src='/modules/features/pages/components/templates/map-info-frame.html'; // 固定，不加时间戳
+          ifr.src='/modules/features/pages/components/map-info-frame.html'; // 固定，不加时间戳
           ifr.addEventListener('load', function(){
             setTimeout(function(){ lockWidth(ifr); }, 0);
             setTimeout(function(){ lockWidth(ifr); }, 60);

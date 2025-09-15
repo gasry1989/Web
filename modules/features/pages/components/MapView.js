@@ -69,7 +69,7 @@ export function createMapView({ amapKey, securityJsCode, debug = true } = {}) {
     const sec = resolveSec();
     if (!key) { showHint('缺少高德 Key（AMAP_KEY）'); warn('缺少高德 Key（AMAP_KEY）'); }
 
-    iframe.src = `/modules/features/pages/components/templates/map-view-frame.html`;
+    iframe.src = `/modules/features/pages/components/map-view-frame.html`;
     log('mount begin, size=', host.getBoundingClientRect());
 
     const onMsg = (e) => {

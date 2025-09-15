@@ -28,7 +28,7 @@ export function mountLoginPage() {
   main.innerHTML = `<div id="loginPageMount"></div>`;
   const mountPoint = main.querySelector('#loginPageMount');
 
-  importTemplate('/modules/features/pages/templates/login-page.html', 'tpl-login-page')
+  importTemplate('/modules/features/pages/login-page.html', 'tpl-login-page')
     .then(frag => {
       // 修复点：先获取元素，再安全赋值（不要用可选链在赋值左侧）
       const footer = frag.querySelector('.login-footer');

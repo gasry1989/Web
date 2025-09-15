@@ -24,7 +24,7 @@ export async function showEditUserModal(user){
 
   let frag;
   try {
-    frag = await importTemplate('/modules/features/pages/modals/templates/edit-user-modal.html', 'tpl-edit-user-modal');
+    frag = await importTemplate('/modules/features/pages/modals/edit-user-modal.html', 'tpl-edit-user-modal');
   } catch (e) {
     console.error('[EditUserModal] template load failed', e);
     return;

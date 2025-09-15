@@ -27,7 +27,7 @@ export function createTreePanel() {
 
   (async () => {
     try {
-      const html = await fetch('/modules/features/pages/components/templates/tree-panel.html', { cache: 'no-cache' }).then(r => r.text());
+      const html = await fetch('/modules/features/pages/components/tree-panel.html', { cache: 'no-cache' }).then(r => r.text());
       const frag = new DOMParser().parseFromString(html, 'text/html').querySelector('#tpl-tree-panel').content.cloneNode(true);
       root.appendChild(frag);
 
