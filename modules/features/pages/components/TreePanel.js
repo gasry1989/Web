@@ -1,11 +1,11 @@
 /**
  * TreePanel 设备树（Shadow DOM）- 模板化
+ * 变更：去掉 refreshBtn 引用，其他 API 不变
  */
 export function createTreePanel() {
   const host = document.createElement('div');
   const root = host.attachShadow({ mode: 'open' });
 
-  // 注入模板
   (async () => {
     const frag = await (await fetch('/modules/features/pages/components/templates/tree-panel.html', { cache: 'no-cache' })
       .then(r=>r.text()).then(t=> new DOMParser().parseFromString(t, 'text/html')))
@@ -148,7 +148,7 @@ export function createTreePanel() {
     return { devType, devMode, searchStr, onlyOnline };
   }
   const controls = {
-    refreshBtn: () => root.getElementById('btnRefresh'),
+    // refreshBtn 已移除
     typeSelect: () => root.getElementById('fltDevType'),
     modeSelect: () => root.getElementById('fltDevMode'),
     searchInput: () => root.getElementById('fltSearch'),
