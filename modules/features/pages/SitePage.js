@@ -1,11 +1,8 @@
 /**
  * SitePage（装配）
  * 变更要点：
- * - 打开模式时标题包含具体模式名（如“9527 音视频模式”）
- * - 同一设备的同一模式只允许打开一个实例；再次打开直接 toast 提示“模式已打开”
- * - window.pushModeData({ devId, modeId, data }) 路由到对应窗口 setData
- * - 内置 300ms 本地 MOCK（可用 ?mock=0 关闭），支持设备数量动态变化
- * - 地图信息窗“无经纬度 -> 上次位置 -> 首次居中”的逻辑在 map-view-frame.html 内处理
+ * - 标题栏拖拽：支持“插入式重排”（把A插到B的前/后，其他顺位挤开）
+ * - findFreeSlot 改为按当前 DOM 顺序（可视顺序）寻找空位
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './modes/VideoPreview.js';
@@ -157,6 +154,9 @@ export function mountSitePage() {
         const body = document.getElementById(`mediaBody${i}`); if (body) body.setAttribute('data-free','1');
       }
 
+      // 启用：标题栏拖拽 -> 插入式重排
+      enableGridDragReorder(grid);
+
       // 首屏数据
       bootstrapData(statusPanel.querySelector('#summaryChart'), notifyPanel.querySelector('#notifyList'));
 
@@ -164,7 +164,7 @@ export function mountSitePage() {
       window.pushModeData = function pushModeData({ devId, modeId, data }) {
         try {
           const s = mediaSlots.find(x => x.type==='mode' && String(x.devId)===String(devId) && Number(x.modeId)===Number(modeId));
-        if (!s || !s.inst || typeof s.inst.setData!=='function') return;
+          if (!s || !s.inst || typeof s.inst.setData!=='function') return;
           s.inst.setData(data);
         } catch (e) {
           console.warn('[Site] pushModeData error', e);
@@ -327,11 +327,15 @@ function initSplitter(leftWrap, splitter, onDrag) {
 
 /* ---------------- 媒体窗口 ---------------- */
 function findFreeSlot() {
-  for (let i = 0; i < mediaSlots.length; i++) {
-    const s = mediaSlots[i];
-    const body = document.getElementById(`mediaBody${i}`);
+  // 按“当前可视顺序”（DOM 顺序）从左到右寻找空位
+  const grid = document.getElementById('mediaGrid');
+  if (!grid) return -1;
+  const orderedCells = Array.from(grid.children);
+  for (const cell of orderedCells) {
+    const idx = Number(cell.getAttribute('data-idx'));
+    const body = document.getElementById(`mediaBody${idx}`);
     const isFreeDom = body && body.getAttribute('data-free') !== '0';
-    if (!s.type && isFreeDom) return i;
+    if (!mediaSlots[idx].type && isFreeDom) return idx;
   }
   return -1;
 }
@@ -521,6 +525,83 @@ function genMockResponse(devId, modeId){
     if (prob(0.05)) st.batteries[i] = Math.max(0, Math.min(100, st.batteries[i] + (Math.random()*2-1)*3));
   }
   return { labels: st.labels.slice(0,12), values: st.values.slice(0,12), batteries: st.batteries.slice(0,12) };
+}
+
+/* ---------------- 拖拽重排（插入式）仅限 6 个媒体窗口 ---------------- */
+function enableGridDragReorder(grid) {
+  if (!grid) return;
+
+  // 标题栏作为拖拽把手，关闭按钮不参与拖拽
+  grid.querySelectorAll('.sp-cell-hd').forEach(hd => {
+    hd.setAttribute('draggable', 'true');
+    const btn = hd.querySelector('[data-close]');
+    if (btn) {
+      btn.setAttribute('draggable', 'false');
+      btn.addEventListener('dragstart', e => e.stopPropagation());
+      btn.addEventListener('mousedown', e => e.stopPropagation());
+    }
+  });
+
+  let dragSrcCell = null;
+  let dragOverCell = null;
+
+  grid.addEventListener('dragstart', (e) => {
+    const hd = e.target.closest('.sp-cell-hd');
+    if (!hd || e.target.closest('[data-close]')) { e.preventDefault?.(); return; }
+    dragSrcCell = hd.closest('.sp-cell');
+    if (!dragSrcCell) return;
+    try { e.dataTransfer.setData('text/plain', dragSrcCell.getAttribute('data-idx') || ''); } catch {}
+    e.dataTransfer.effectAllowed = 'move';
+    dragSrcCell.classList.add('dragging');
+  });
+
+  grid.addEventListener('dragend', () => {
+    if (dragSrcCell) dragSrcCell.classList.remove('dragging');
+    if (dragOverCell) dragOverCell.classList.remove('drag-target');
+    dragSrcCell = null; dragOverCell = null;
+  });
+
+  grid.addEventListener('dragover', (e) => {
+    if (!dragSrcCell) return;
+    e.preventDefault(); // 必须阻止默认，drop 才会触发
+    e.dataTransfer.dropEffect = 'move';
+
+    const cell = e.target.closest('.sp-cell');
+    if (!cell || cell === dragSrcCell) {
+      if (dragOverCell) dragOverCell.classList.remove('drag-target');
+      dragOverCell = null;
+      return;
+    }
+    if (dragOverCell !== cell) {
+      if (dragOverCell) dragOverCell.classList.remove('drag-target');
+      dragOverCell = cell;
+      dragOverCell.classList.add('drag-target');
+    }
+  });
+
+  grid.addEventListener('drop', (e) => {
+    if (!dragSrcCell) return;
+    e.preventDefault();
+
+    const targetCell = e.target.closest('.sp-cell');
+    if (!targetCell || targetCell === dragSrcCell) return;
+
+    // 根据鼠标在目标单元的左右半区决定插入到“前面”还是“后面”
+    const rect = targetCell.getBoundingClientRect();
+    const insertAfter = (e.clientX > rect.left + rect.width / 2);
+
+    const parent = grid;
+    if (insertAfter) {
+      const ref = targetCell.nextElementSibling;
+      parent.insertBefore(dragSrcCell, ref); // ref 为 null 时等同 append 到末尾
+    } else {
+      parent.insertBefore(dragSrcCell, targetCell);
+    }
+
+    dragSrcCell.classList.remove('dragging');
+    if (dragOverCell) dragOverCell.classList.remove('drag-target');
+    dragSrcCell = null; dragOverCell = null;
+  });
 }
 
 /* ---------------- 工具 ---------------- */
