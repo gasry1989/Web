@@ -3,6 +3,7 @@
  * 变更要点：
  * - 标题栏拖拽：支持“插入式重排”（把A插到B的前/后，其他顺位挤开）
  * - findFreeSlot 改为按当前 DOM 顺序（可视顺序）寻找空位
+ * - 修复：树点击未分组设备时接口失败被吞，导致信息窗不弹。现在失败也会兜底打开信息窗并打印 warn。
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './modes/VideoPreview.js';
@@ -123,23 +124,30 @@ export function mountSitePage() {
       mapMount.appendChild(mapView);
       mapView.mount();
 
+      // 打开视频/模式/刷新事件
       mapView.addEventListener('openVideo', (e)=> openVideoInSlot(e.detail.devId, e.detail.devNo));
       mapView.addEventListener('openMode',  (e)=> openModeInSlot(e.detail.devId, e.detail.devNo, e.detail.modeId));
-      mapView.addEventListener('refreshDevice', async (e)=>{ try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch{} });
+      mapView.addEventListener('refreshDevice', async (e)=>{ try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch(err){ console.warn('[Site] refreshDevice api error, keep window, id=', e.detail.devId, err); } });
       mapView.addEventListener('markerClick', async (e) => {
         try {
           const data = await apiDeviceInfo(e.detail.devId);
           mapView.openDevice({ devInfo: data.devInfo, followCenterWhenNoLocation: true });
         } catch (err) {
-          console.error('[Site] markerClick -> openDevice error', err);
+          console.warn('[Site] markerClick api error, fallback openDevice', err);
+          mapView.openDevice({ devInfo: { id: e.detail.devId, devNo: e.detail.devNo }, followCenterWhenNoLocation: true });
         }
       });
-      // 树点击 -> 信息窗（无经纬度：MapView 内部“上次位置/首次居中”逻辑处理）
+
+      // 树点击 -> 信息窗（修复：接口失败也兜底打开，且输出 warn）
       tree.addEventListener('deviceclick', async (e)=>{
+        const devId = e.detail?.devId;
         try{
-          const data=await apiDeviceInfo(e.detail.devId);
-          mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true });
-        }catch{}
+          const data = await apiDeviceInfo(devId);
+          mapView.openDevice({ devInfo: (data && data.devInfo) ? data.devInfo : { id: devId, no: e.detail?.devNo, lastLocation: e.detail?.lastLocation }, followCenterWhenNoLocation:true });
+        }catch(err){
+          console.warn('[Site] deviceclick apiDeviceInfo failed, fallback openDevice. id=', devId, err);
+          mapView.openDevice({ devInfo: { id: devId, no: e.detail?.devNo, lastLocation: e.detail?.lastLocation }, followCenterWhenNoLocation:true });
+        }
       });
 
       // 媒体关闭
