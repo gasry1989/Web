@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>倾角模式详情</title>
   <style>
-    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
     *{box-sizing:border-box;}
     .wrap{ position:absolute; inset:48px 0 0 0; overflow:auto; }
     .hdr, .row{ display:grid; grid-template-columns:120px 1fr 120px 120px 120px 120px 120px 200px; align-items:center; padding:10px 16px; }
@@ -70,7 +70,7 @@
     }
     render([{},{},{}]); // 初始空 UI
 
-    // 打开 WS 通道并发起一次模式数据请求
+    // 打开 WS 通道并发起一次模式数据请求（确保复用）
     const ch = await bridge.wsOpen({ kind:'mode', devId, modeId: 1 });
     bridge.wsSend(ch, {
       cmd: 'modeData',

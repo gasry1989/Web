@@ -4,14 +4,14 @@
   <meta charset="utf-8"/>
   <title>视频详情</title>
   <style>
-    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
     *{box-sizing:border-box;}
     .layout{ position:absolute; inset:48px 0 0 0; display:grid; grid-template-columns: 1fr 320px; }
     .videoPane{ position:relative; background:#000; }
     video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
     .side{ border-left:1px solid #1f2a3a; padding:12px; overflow:auto; }
     .ctl{ display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin:10px 0; }
-    .btn{ background:#1f7fb8; border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:6px; padding:8px; cursor:pointer; text-align:center; }
+    .btn{ background:#1f7fb8; border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:6px; padding:8px; cursor:pointer; text-align:center; white-space:nowrap; }
     .ptz{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; justify-items:center; align-items:center; margin:12px 0; }
     .ptz .dir{ width:44px; height:44px; border:2px solid #fff; border-radius:6px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
     .row{ display:flex; align-items:center; justify-content:center; gap:10px; margin:8px 0; }
@@ -75,7 +75,7 @@
     const urlMap = { main: STREAMS.main, sub: STREAMS.sub, screen: STREAMS.screen };
     play(urlMap[stream] || STREAMS.main, mainVideo);
 
-    // WS 通道（视频控制）
+    // WS 通道（视频控制）—— 确保仅连接一次，已连则复用
     const ch = await bridge.wsOpen({ kind:'video', devId });
     const to = { type: 1, id: devId };
 

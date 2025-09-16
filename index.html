@@ -113,6 +113,19 @@
     .toast-error{border-color:#7d2b2b; background:rgba(120,40,40,.95);}
     .toast-warn{border-color:#806010; background:rgba(120,88,20,.95);}
     .toast-info{border-color:#2e4d7f; background:rgba(40,60,95,.95);}
+
+    /* === WS 连接状态徽标（Header右侧） === */
+    .ws-badge{
+      display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px;
+      font-size:12px; border:1px solid var(--color-border); color:#cfd8dc;
+    }
+    .ws-badge .dot{ width:8px; height:8px; border-radius:50%; background:#777; }
+    .ws-badge.ok{ background:rgba(33,155,98,.15); border-color:#2d8d62; color:#9fe6b8; }
+    .ws-badge.ok .dot{ background:#21c98f; }
+    .ws-badge.connecting{ background:rgba(80,120,200,.12); border-color:#3d78d4; color:#9ec3ff; }
+    .ws-badge.connecting .dot{ background:#3d78d4; }
+    .ws-badge.down{ background:rgba(160,60,60,.12); border-color:#a44; color:#f3a6a6; }
+    .ws-badge.down .dot{ background:#d64f4f; }
   </style>
 </head>
 <body>

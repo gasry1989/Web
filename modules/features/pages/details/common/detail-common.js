@@ -14,16 +14,44 @@ export function mountTopbar(container) {
   bar.innerHTML = `
     <style>
       #detailTopbar{
-        height:48px; display:grid; grid-template-columns:auto 1fr auto auto auto auto auto;
-        align-items:center; gap:14px; padding:0 16px; background:#111c28; color:#e6f0ff;
-        border-bottom:1px solid rgba(255,255,255,.12); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+        height:48px;
+        display:flex;
+        align-items:center;
+        gap:14px;
+        padding:0 16px;
+        background:#111c28;
+        color:#e6f0ff;
+        border-bottom:1px solid rgba(255,255,255,.12);
+        font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+        white-space:nowrap;
+        overflow:hidden;
       }
-      .btn{background:#1f7fb8;border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:600;}
-      .btn.secondary{ background:#1f497d; }
+      #detailTopbar .btn{
+        background:#1f7fb8;
+        border:1px solid rgba(255,255,255,.25);
+        color:#fff;
+        border-radius:6px;
+        height:32px;
+        padding:0 12px;
+        cursor:pointer;
+        font-weight:600;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        line-height:1;
+        white-space:nowrap;
+      }
+      #detailTopbar .btn.secondary{ background:#1f497d; }
       #btnBack{ background:#2a8fbc; }
       #lblOnline{ color:#aee6a7; font-weight:600; }
-      #lblConnTimer{ color:#cfd8dc; opacity:.85; }
-      #btnVolume{ font-size:20px; line-height:1; cursor:pointer; background:transparent; border:none; color:#fff; }
+      #lblConnTimer{ color:#cfd8dc; opacity:.85; margin-left:auto; white-space:nowrap; }
+      #btnVolume{
+        font-size:20px; line-height:1; cursor:pointer; background:transparent; border:none; color:#fff;
+        width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center;
+      }
+      #lblDevNo{
+        min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:28vw;
+      }
     </style>
     <button class="btn" id="btnBack">返回</button>
     <div id="lblDevNo">--</div>
@@ -59,8 +87,15 @@ export function mountTopbar(container) {
 export function detailBridge() {
   const listeners = new Set(); // ws message listeners
   const chSet = new Set();     // opened channels
-  const pendingOpen = new Map();// reqId -> resolve
+  const pendingOpen = new Map();// reqId -> { resolve, key }
+  const chByKey = new Map();   // key -> ch
+  const pendingByKey = new Map(); // key -> Promise<ch>
   let inited = false;
+
+  function keyOf({ kind, devId, modeId, extra }) {
+    const ex = extra ? JSON.stringify(extra) : '';
+    return `${kind||''}|${devId||''}|${modeId||''}|${ex}`;
+  }
 
   function post(msg){ parent.postMessage(Object.assign({ __detail:true }, msg), '*'); }
 
@@ -75,7 +110,12 @@ export function detailBridge() {
       case 'ws:open:ok':
         {
           const p = pendingOpen.get(m.reqId);
-          if (p) { pendingOpen.delete(m.reqId); chSet.add(m.ch); p.resolve(m.ch); }
+          if (p) {
+            pendingOpen.delete(m.reqId);
+            chSet.add(m.ch);
+            if (p.key) chByKey.set(p.key, m.ch);
+            p.resolve(m.ch);
+          }
         }
         break;
       case 'ws:message':
@@ -85,6 +125,10 @@ export function detailBridge() {
         break;
       case 'ws:closed':
         chSet.delete(m.ch);
+        // 清理 key->ch 映射
+        for (const [k, chVal] of chByKey.entries()) {
+          if (chVal === m.ch) chByKey.delete(k);
+        }
         break;
       case 'navigate':
         // 同遮罩内导航（设备页内打开模式）
@@ -98,10 +142,27 @@ export function detailBridge() {
     ready({ page, devId, devNo, modeId }) {
       post({ t:'ready', page, devId, devNo, modeId });
     },
-    async wsOpen({ kind, devId, modeId, extra }) {
+    async wsOpen(params) {
+      const key = keyOf(params||{});
+      const existing = chByKey.get(key);
+      if (existing && chSet.has(existing)) {
+        return existing; // 已连接则复用
+      }
+      if (pendingByKey.has(key)) {
+        return await pendingByKey.get(key); // 正在连接中，复用同一个 Promise
+      }
       const reqId = Date.now() + Math.floor(Math.random()*1000);
-      post({ t:'ws:open', reqId, kind, devId, modeId, extra });
-      return await new Promise((resolve)=> pendingOpen.set(reqId, { resolve }));
+      const p = new Promise((resolve)=> {
+        pendingOpen.set(reqId, { resolve, key });
+      });
+      pendingByKey.set(key, p);
+      post(Object.assign({ t:'ws:open', reqId }, params));
+      try {
+        const ch = await p;
+        return ch;
+      } finally {
+        pendingByKey.delete(key);
+      }
     },
     wsSend(ch, data) {
       post({ t:'ws:send', ch, data });

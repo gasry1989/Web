@@ -1,9 +1,14 @@
 import { authState, authLogout } from '@core/auth.js';
 import { eventBus } from '@core/eventBus.js';
+import { wsClient } from '@core/wsClient.js'; // 新增：读取初始状态
 
 let lastIsLoginRoute = null;
 let cachedSidebarDisplay = null;
 let unsubscribeAuth = null;
+
+// 仅绑定一次的 WS 状态监听
+let wsStatusBound = false;
+let offWsStatus = null;
 
 export function renderHeaderUserMount() {
   const headerRight = document.getElementById('headerRight');
@@ -45,7 +50,7 @@ export function renderHeaderUserMount() {
         mainView.style.marginLeft = '0';
       }
       appLayout && appLayout.classList.add('login-mode');
-      if (headerRight) headerRight.innerHTML = ''; // 登录页不显示“登录”按钮自身
+      if (headerRight) headerRight.innerHTML = ''; // 登录页不显示
     } else {
       // 还原
       if (sidebar && cachedSidebarDisplay !== null) {
@@ -58,33 +63,72 @@ export function renderHeaderUserMount() {
         if (mainView.dataset._prevBorder !== undefined) {
           mainView.style.border = mainView.dataset._prevBorder;
         }
-        // 若你的布局本来通过 class 控制 margin-left，可在此不强制设置
       }
       appLayout && appLayout.classList.remove('login-mode');
       renderUserArea(); // 非登录路由重新渲染 header 用户区
     }
   }
 
+  function statusClass(s) {
+    if (s === 'connected') return 'ok';
+    if (s === 'connecting') return 'connecting';
+    return 'down';
+  }
+  function statusText(s) {
+    if (s === 'connected') return '已连接';
+    if (s === 'connecting') return '连接中';
+    return '未连接';
+  }
+  function updateWsBadge(s) {
+    const el = document.getElementById('wsStatusBadge');
+    if (!el) return;
+    el.className = `ws-badge ${statusClass(s)}`;
+    const txt = el.querySelector('.txt');
+    if (txt) txt.textContent = statusText(s);
+    el.title = `WebSocket：${statusText(s)}`;
+  }
+
+  function ensureWsStatusListener() {
+    if (wsStatusBound) return;
+    wsStatusBound = true;
+    offWsStatus = eventBus.on('ws:statusChange', s => updateWsBadge(s));
+    // 初始化一次
+    try { updateWsBadge(wsClient.status || 'disconnected'); } catch {}
+  }
+
   function renderUserArea() {
+    if (!headerRight) return;
     if (isLoginRoute()) {
-      if (headerRight) headerRight.innerHTML = '';
+      headerRight.innerHTML = '';
       return;
     }
     const s = authState.get();
-    if (!headerRight) return;
+
+    // 连接状态徽标（总是显示在右侧）
+    const current = (wsClient && wsClient.status) ? wsClient.status : 'disconnected';
+    const wsBadgeHtml = `
+      <span id="wsStatusBadge" class="ws-badge ${statusClass(current)}" title="WebSocket：${statusText(current)}">
+        <span class="dot"></span><span class="txt">${statusText(current)}</span>
+      </span>
+    `;
 
     if (!s.token || !s.userInfo) {
-      headerRight.innerHTML = `<a href="#/login" class="btn btn-xs" id="btnLoginLink">登录</a>`;
-    } else {
-      headerRight.innerHTML = `
-        <span class="user-label">${escapeHTML(s.userInfo.userName||'用户')} (角色ID:${s.userInfo.roleId})</span>
-        <button class="btn btn-xs" id="btnLogout">退出</button>
-      `;
-      headerRight.querySelector('#btnLogout')?.addEventListener('click', () => {
-        authLogout();
-        eventBus.emit('toast:show', { type:'info', message:'已退出登录' });
-      });
+      headerRight.innerHTML = `${wsBadgeHtml}<a href="#/login" class="btn btn-xs" id="btnLoginLink">登录</a>`;
+      ensureWsStatusListener();
+      return;
     }
+
+    headerRight.innerHTML = `
+      ${wsBadgeHtml}
+      <span class="user-label">${escapeHTML(s.userInfo.userName||'用户')} (角色ID:${s.userInfo.roleId})</span>
+      <button class="btn btn-xs" id="btnLogout">退出</button>
+    `;
+    headerRight.querySelector('#btnLogout')?.addEventListener('click', () => {
+      authLogout();
+      eventBus.emit('toast:show', { type:'info', message:'已退出登录' });
+    });
+
+    ensureWsStatusListener();
   }
 
   function fullRefresh() {
