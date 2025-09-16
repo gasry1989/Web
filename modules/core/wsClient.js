@@ -136,7 +136,20 @@ class WSClient {
   }
 
   ensureConnected() {
+    // 登录页调用过 closeManual() 会把 manualClosed=true；
+    // 离开登录页（进入业务页）后需要允许重新连接。
+    if (this.manualClosed) {
+      this.manualClosed = false;
+    }
+
+    // 未连接则发起连接
     if (this.status === 'disconnected') {
+      this.connect();
+      return;
+    }
+
+    // 兜底：状态异常但 ws 实例已空时也尝试连接
+    if (!this.ws && this.status !== 'connecting') {
       this.connect();
     }
   }

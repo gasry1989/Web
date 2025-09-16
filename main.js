@@ -43,6 +43,9 @@ function reconcileWS() {
     try { wsClient.closeManual(); } catch {}
     return;
   }
+  // 离开登录页后，确保允许重连（与 wsClient.ensureConnected 的兜底相互独立，二者都在也不冲突）
+  try { wsClient.manualClosed = false; } catch {}
+
   // 非登录页：如有 token 则确保连接（去重由 wsClient 内部处理）
   if (latestToken) {
     try { ensureGlobalWS(); } catch {}
