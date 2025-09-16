@@ -7,6 +7,9 @@
  *  - bridge.ready({ page:'video'|'device'|'mode-tilt'|'mode-disp-tilt'|'mode-audio', devId, devNo, modeId? })
  *  - const ch = await bridge.wsOpen({ kind:'mode', devId, modeId })
  *  - bridge.onWsMessage((m)=>{ ... })
+ *
+ * 更新：
+ *  - 新增 getInit()/waitInit()：获取/等待父页下发的 init（含 devId/devNo/modeId/stream 等）
  */
 export function mountTopbar(container) {
   const bar = document.createElement('div');
@@ -92,6 +95,10 @@ export function detailBridge() {
   const pendingByKey = new Map(); // key -> Promise<ch>
   let inited = false;
 
+  // 新增：保存 init，并支持等待
+  let initData = null;
+  const initWaiters = [];
+
   function keyOf({ kind, devId, modeId, extra }) {
     const ex = extra ? JSON.stringify(extra) : '';
     return `${kind||''}|${devId||''}|${modeId||''}|${ex}`;
@@ -106,6 +113,10 @@ export function detailBridge() {
       case 'init':
         // 可按需使用 m.devId/devNo/config/mock
         inited = true;
+        initData = m;
+        while (initWaiters.length) {
+          try { initWaiters.shift()(initData); } catch {}
+        }
         break;
       case 'ws:open:ok':
         {
@@ -170,6 +181,10 @@ export function detailBridge() {
     wsClose(ch) {
       post({ t:'ws:close', ch });
     },
-    onWsMessage(fn) { listeners.add(fn); return ()=>listeners.delete(fn); }
+    onWsMessage(fn) { listeners.add(fn); return ()=>listeners.delete(fn); },
+
+    // 新增：读取/等待父页下发的 init
+    getInit(){ return initData; },
+    waitInit(){ return initData ? Promise.resolve(initData) : new Promise(res => initWaiters.push(res)); }
   };
 }

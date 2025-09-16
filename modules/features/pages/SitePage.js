@@ -704,18 +704,31 @@ function ensureOverlay() {
   const onMsg = function (e) {
     const msg = e.data || {};
     if (!msg || !msg.__detail) return;
+
+    // 子页 ready -> 下发 init（把 openOverlay 时的参数带回去，确保有 devId/devNo/modeId/stream）
+    if (msg.t === 'ready') {
+      try {
+        const payload = Object.assign({ t:'init' }, (__overlay.initParams || {}));
+        iframe.contentWindow?.postMessage(Object.assign({ __detail:true }, payload), '*');
+      } catch (err) {
+        console.warn('[Overlay] send init failed', err);
+      }
+      return;
+    }
+
     if (msg.t === 'back') closeOverlay();
     if (msg.t === 'openMode') openModeDetailOverlay(msg.devId, msg.devNo, msg.modeId);
   };
   window.addEventListener('message', onMsg);
 
-  __overlay = { host: host, iframe: iframe, onMsg: onMsg };
+  __overlay = { host: host, iframe: iframe, onMsg: onMsg, initParams: null };
   return __overlay;
 }
 function openOverlay(url, params){
   const ov = ensureOverlay();
   const qs = new URLSearchParams(params || {});
   qs.set('_ts', Date.now());
+  ov.initParams = Object.assign({}, params || {}); // 记住，供 ready 时下发 init
   ov.iframe.src = url + '?' + qs.toString();
   ov.host.style.display = 'block';
 }

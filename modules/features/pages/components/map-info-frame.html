@@ -150,7 +150,7 @@
         state = d || state;
         var info = state.devInfo || {};
         var ic=document.getElementById('icon'); ic.className = 'ov-ic ' + typeClassOf(info);
-        setTxt('devName', info.no || String(info.id||''));
+        setTxt('devName', info.no || info.devNo || String(info.id||''));
         var b=battInfo(info.battery);
         var batt=document.getElementById('batt'); batt.classList.remove('batt-ok','batt-mid','batt-low'); batt.classList.add(b.cls);
         document.getElementById('battFill').style.width = b.n + '%';
@@ -194,10 +194,10 @@
 
       document.getElementById('btnClose').addEventListener('click', function(){ post({ t:'close' }); });
       document.getElementById('btnDetail').addEventListener('click', function(){
-        var d=state.devInfo||{}; post({ t:'openDetail', devId:d.id, devNo:d.no });
+        var d=state.devInfo||{}; post({ t:'openDetail', devId:(d.id!=null?d.id:d.devId), devNo:(d.no||d.devNo) });
       });
       document.getElementById('btnRefresh').addEventListener('click', function(){
-        var d=state.devInfo||{}; post({ t:'refreshDevice', devId:d.id });  // 纯异步通知父页面刷新数据
+        var d=state.devInfo||{}; post({ t:'refreshDevice', devId:(d.id!=null?d.id:d.devId) });
       });
       document.getElementById('btnShowAddr').addEventListener('click', function(){
         var d=state.devInfo||{}; if (!d.lastLocation) return;
@@ -206,11 +206,11 @@
       });
       document.getElementById('btnOpenVideo').addEventListener('click', function(){
         var d=state.devInfo||{}; var sel=document.getElementById('streamSel');
-        post({ t:'openVideo', devId:d.id, devNo:d.no, cameraIndex:1, streamType: sel? String(sel.value||'main') : 'main' });
+        post({ t:'openVideo', devId:(d.id!=null?d.id:d.devId), devNo:(d.no||d.devNo), cameraIndex:1, streamType: sel? String(sel.value||'main') : 'main' });
       });
       document.getElementById('btnOpenMode').addEventListener('click', function(){
         var d=state.devInfo||{}; var sel=document.getElementById('modeSel');
-        post({ t:'openMode', devId:d.id, devNo:d.no, modeId: sel && sel.value });
+        post({ t:'openMode', devId:(d.id!=null?d.id:d.devId), devNo:(d.no||d.devNo), modeId: sel && sel.value });
       });
 
       window.addEventListener('message', function(e){

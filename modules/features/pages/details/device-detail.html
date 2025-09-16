@@ -21,7 +21,7 @@
   </script>
   <style>
     :root{
-      /* 视频卡片：更小，避免遮住模式区；16:9 不变形，但我们用填充绘制 */
+      /* 视频卡片：更小，避免遮住模式区；16:9 外框，内部画面用 fill 铺满 */
       --card-w-video: clamp(260px, 26vw, 360px);
       --card-h-video: calc(var(--card-w-video) * 9 / 16);
 
@@ -91,15 +91,26 @@
     import { apiDeviceInfo } from '@api/deviceApi.js';
     import { authLoadToken } from '@core/auth.js';
 
-    // 关键：在 iframe 页面内加载本地 token，保证接口带上 Authorization
     try { authLoadToken(); } catch {}
 
-    const qs = new URLSearchParams(location.search);
-    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
     const ui = mountTopbar(document.body);
-    ui.lblDevNo.textContent = devNo || devId || '设备';
     const bridge = detailBridge();
+
+    // 先读 URL；若没有，再等待父页下发的 init 兜底拿 devId/devNo
+    const qs = new URLSearchParams(location.search);
+    let devId = qs.get('devId') || '';
+    let devNo = qs.get('devNo') || '';
+
     bridge.ready({ page:'device', devId, devNo });
+
+    if (!devId) {
+      const init = await bridge.waitInit();
+      devId = String(init?.devId || '');
+      devNo = devNo || String(init?.devNo || '');
+      ui.lblDevNo.textContent = devNo || devId || '设备';
+    } else {
+      ui.lblDevNo.textContent = devNo || devId || '设备';
+    }
 
     // 布局
     const main = document.createElement('div'); main.className='main';
@@ -147,12 +158,11 @@
     document.body.appendChild(main);
     document.getElementById('devIdLbl').textContent = devId || '--';
 
-    /* ------------- 视频预览（填充模式） ------------- */
+    /* ------------- 视频预览（填充） ------------- */
     const mountedPreviews = [];
     function mountPreview(cellId, url){
       const cell = document.getElementById(cellId);
       if (!cell) return;
-      // 按你的要求改为 fill（不保持比例，铺满卡片）
       const vp = createVideoPreview({ objectFit:'fill' });
       cell.appendChild(vp);
       mountedPreviews.push(vp);
@@ -174,20 +184,18 @@
     mountMode('cellModeDispTilt', createModeDispTilt);
     mountMode('cellModeAudio', createModeAudio);
 
-    // Mock feeder：音频固定 12 份，避免柱子留空
+    // 音频/倾角/位移·倾角 mock feeder（省略生成函数，这里与 SitePage 一致的 12/<=12 逻辑）
     const mockState = new Map();
     let mockTimer = null;
     function clamp(v,min,max){ return v<min?min:(v>max?max:v); }
     function step(v,amp,min,max){ return clamp(v + (Math.random()*2-1)*amp, min, max); }
     function prob(p){ return Math.random() < p; }
     function rnd(a,b){ return Math.random()*(b-a)+a; }
-
     function genTilt(){
       const key='tilt'; if(!mockState.has(key)) mockState.set(key,{items:[]});
       const st=mockState.get(key);
-      // 数量可变（用于观感），但最多 12
       if (!st.items || prob(0.10)) {
-        const n = Math.floor(rnd(4,13)); // 4~12 个
+        const n = Math.floor(rnd(4,13));
         st.items = Array.from({length:n}, (_,i)=>({ name:'倾角'+(i+1)+'#', deg:rnd(0,1.2), batt:rnd(60,100), alarmOn:Math.random()>.2, sirenOn:Math.random()>.2 }));
       }
       st.items.forEach(it=> it.deg = step(it.deg, 0.12, 0, 1.5));
@@ -213,7 +221,6 @@
       };
     }
     function genAudioFixed12(){
-      // 始终 12 份，labels=1..12，values/batteries 长度固定 12，避免留空
       const key='audio12';
       if (!mockState.has(key)) {
         mockState.set(key, {
@@ -244,13 +251,14 @@
     function stopMock(){ try{ if (mockTimer) clearInterval(mockTimer); }catch{} mockTimer=null; }
     startMock();
 
-    /* ------------------- 能力探测 + 布局隐藏/重排 ------------------- */
+    /* ------------------- 根据设备能力动态隐藏并重排 ------------------- */
     function setCols(el, n){ if (el) el.style.setProperty('--cols', String(Math.max(0, n))); }
     function hide(el, flag){ if (!el) return; el.classList.toggle('hide', !!flag); }
 
     async function loadDeviceInfoAndLayout(){
+      if (!devId) return;
       try{
-        const resp = await apiDeviceInfo(devId);
+        const resp = await apiDeviceInfo(Number(devId));
         const d = (resp && resp.devInfo) ? resp.devInfo : {};
 
         // 右侧信息
@@ -271,7 +279,7 @@
 
         const hasScreen = screenCount > 0;
         const hasMain = cameraCount > 0;
-        const hasSub  = cameraCount > 0; // 如需更细分可增加后端标记
+        const hasSub  = cameraCount > 0;
 
         if (hasScreen) mountPreview('cellScreen', STREAMS.screen);
         hide(document.getElementById('secScreen'), !hasScreen);
@@ -283,7 +291,7 @@
         hide(document.getElementById('secMedia'), mediaCards.length === 0);
         setCols(document.getElementById('rowMedia'), mediaCards.length);
 
-        // 模式支持（用汉字名匹配；都匹配不到时保留全部）
+        // 模式支持（汉字匹配；都匹配不到时保留全部）
         let supportTilt = true, supportDispTilt = true, supportAudio = true;
         if (Array.isArray(d.modeList) && d.modeList.length) {
           const names = d.modeList.map(m=>String(m.name||''));
@@ -310,7 +318,6 @@
         }
       } catch (e) {
         console.warn('[device-detail] apiDeviceInfo failed; will still show defaults', e);
-        // 即使失败，也挂默认的三路视频（可能拉不动）与三种模式
         mountPreview('cellScreen', STREAMS.screen);
         mountPreview('cellMain', STREAMS.main);
         mountPreview('cellSub',  STREAMS.sub);
@@ -318,7 +325,7 @@
     }
     await loadDeviceInfoAndLayout();
 
-    /* ------------------- 交互：跳详情/模式 ------------------- */
+    /* ------------------- 点击：跳详情/模式 ------------------- */
     document.getElementById('leftPane').addEventListener('click', (e)=>{
       const t = e.target.closest('.card'); if (!t || t.classList.contains('blank') || t.classList.contains('hide')) return;
       const id = t.id || '';
@@ -337,7 +344,7 @@
       }
     });
 
-    /* ------------------- WS 操作按钮 ------------------- */
+    /* ------------------- 顶栏按钮 -> 发 WS + 打印 ------------------- */
     const ch = await bridge.wsOpen({ kind:'device', devId });
     const to = { type: 1, id: devId };
 
@@ -358,11 +365,13 @@
     };
     ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
 
+    // 编辑信息/属主：先打 LOG
     document.getElementById('btnEditInfo').onclick  = ()=> console.log('[device-detail] 编辑信息 click, devId=', devId);
     document.getElementById('btnEditOwner').onclick = ()=> console.log('[device-detail] 编辑属主 click, devId=', devId);
 
     bridge.onWsMessage((m)=>{ console.log('[device-detail] WS message:', m); });
 
+    // 清理
     window.addEventListener('beforeunload', ()=>{
       try{ mountedPreviews.forEach(p=>p.destroy && p.destroy()); }catch{}
       try{ mountedModes.forEach(x=>x.mp && x.mp.destroy && x.mp.destroy()); }catch{}
