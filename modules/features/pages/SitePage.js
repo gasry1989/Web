@@ -1,11 +1,11 @@
 /**
  * SitePage（装配）
- * 本版改动要点：
- * - 树状栏设备点击事件兼容多名称（deviceclick/deviceClick/devclick/dev:click），失败兜底也能弹出信息窗
+ * 要点：
+ * - 树状栏设备点击兼容多事件名（deviceclick/deviceClick/devclick/dev:click），失败兜底也能弹出信息窗
  * - 网格标题/内容点击：标题=设备详情；内容=模式/视频详情（enableGridClickOpen）
- * - 标题栏拖拽重排（插入式）并在短时间内抑制误触点击
+ * - 标题栏拖拽重排（插入式）并在短时间内抑制误触点击；标题按下（左键）才显示“移动”光标
  * - Overlay（iframe 全屏）打开 5 个详情页（设备/视频/三种模式）
- * - 维持原有 Mock 模式推送；openVideoInSlot 继续拉主码流占位
+ * - 去除可选链/空 catch 等可能触发解析错误的语法
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './modes/VideoPreview.js';
@@ -36,20 +36,20 @@ let tree = null;
 let mapView = null;
 
 // 网格 6 格（带 devNo 以便详情用）
-const mediaSlots = Array.from({ length: 6 }, (_, i) => ({ idx:i, type:null, inst:null, devId:null, devNo:null, modeId:null }));
+const mediaSlots = Array.from({ length: 6 }, function(_, i){ return { idx:i, type:null, inst:null, devId:null, devNo:null, modeId:null }; });
 
 // MOCK 状态
 const mockState = new Map();
 let mockTimer = null;
 
-const MODE_NAME = (mid)=>{
+function MODE_NAME(mid){
   switch(Number(mid)){
     case 1: return '倾角模式';
     case 2: return '位移·倾角模式';
     case 3: return '音频模式';
     default: return '模式';
   }
-};
+}
 
 export function mountSitePage() {
   document.documentElement.style.overflow = 'hidden';
@@ -70,7 +70,7 @@ export function mountSitePage() {
   window.addEventListener('resize', fitMainHeight);
 
   importTemplate('/modules/features/pages/site-page.html', 'tpl-site-page')
-    .then(async (frag) => {
+    .then(async function (frag) {
       main.appendChild(frag);
       rootEl = main.querySelector('#spRoot');
 
@@ -87,28 +87,28 @@ export function mountSitePage() {
       tree = createTreePanel();
       leftWrap.appendChild(tree);
 
-      try { await (tree.whenReady ? tree.whenReady() : Promise.resolve()); } catch {}
+      try { if (tree.whenReady) await tree.whenReady(); } catch (e) {}
 
       // 折叠状态
       const initCollapsed = loadCollapsed();
       applyLeftCollapsed(initCollapsed);
 
-      treeToggleBtn.addEventListener('click', () => {
+      treeToggleBtn.addEventListener('click', function () {
         const next = !leftWrap.classList.contains('collapsed');
         applyLeftCollapsed(next);
         saveCollapsed(next);
-        try { mapView.resize(); } catch {}
+        try { mapView.resize(); } catch (e) {}
       });
-      treeHandleBtn.addEventListener('click', () => {
+      treeHandleBtn.addEventListener('click', function () {
         applyLeftCollapsed(false);
         saveCollapsed(false);
-        try { mapView.resize(); } catch {}
+        try { mapView.resize(); } catch (e) {}
       });
 
       // 监听树筛选变化（防抖）
-      const onTreeFiltersChange = debounce(() => { reloadByFilters(); }, 250);
-      ['filtersChange','filterchange','filterschange','filters:change'].forEach(evt => {
-        try { tree.addEventListener(evt, onTreeFiltersChange); } catch {}
+      const onTreeFiltersChange = debounce(function () { reloadByFilters(); }, 250);
+      ['filtersChange','filterchange','filterschange','filters:change'].forEach(function(evt){
+        try { tree.addEventListener(evt, onTreeFiltersChange); } catch (e) {}
       });
       leftWrap.addEventListener('input', onTreeFiltersChange, true);
       leftWrap.addEventListener('change', onTreeFiltersChange, true);
@@ -122,17 +122,17 @@ export function mountSitePage() {
       mapView.mount();
 
       // 打开视频/模式/刷新/标注点击/详情
-      mapView.addEventListener('openVideo', (e)=> openVideoInSlot(e.detail.devId, e.detail.devNo));
-      mapView.addEventListener('openMode',  (e)=> openModeInSlot(e.detail.devId, e.detail.devNo, e.detail.modeId));
-      mapView.addEventListener('refreshDevice', async (e)=>{ 
-        try{ 
-          const data=await apiDeviceInfo(e.detail.devId); 
-          mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); 
-        }catch(err){ 
-          console.warn('[Site] refreshDevice api error, keep window, id=', e.detail.devId, err); 
-        } 
+      mapView.addEventListener('openVideo', function(e){ openVideoInSlot(e.detail.devId, e.detail.devNo); });
+      mapView.addEventListener('openMode',  function(e){ openModeInSlot(e.detail.devId, e.detail.devNo, e.detail.modeId); });
+      mapView.addEventListener('refreshDevice', async function(e){
+        try{
+          const data = await apiDeviceInfo(e.detail.devId);
+          mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true });
+        }catch(err){
+          console.warn('[Site] refreshDevice api error, keep window, id=', e.detail.devId, err);
+        }
       });
-      mapView.addEventListener('markerClick', async (e) => {
+      mapView.addEventListener('markerClick', async function(e){
         try {
           const data = await apiDeviceInfo(e.detail.devId);
           mapView.openDevice({ devInfo: data.devInfo, followCenterWhenNoLocation: true });
@@ -141,40 +141,44 @@ export function mountSitePage() {
           mapView.openDevice({ devInfo: { id: e.detail.devId, devNo: e.detail.devNo }, followCenterWhenNoLocation: true });
         }
       });
-      mapView.addEventListener('openDetail', (e)=> openDeviceDetailOverlay(e.detail.devId, e.detail.devNo));
+      mapView.addEventListener('openDetail', function(e){ openDeviceDetailOverlay(e.detail.devId, e.detail.devNo); });
 
       // 树点击 -> 信息窗（兼容多事件名 + 兜底 + 调试日志）
       bindTreeDeviceClick(tree);
 
       // 媒体关闭
-      grid.addEventListener('click', (ev)=>{ 
-        const btn=ev.target.closest('[data-close]'); 
-        if(!btn) return; 
-        const idx=Number(btn.getAttribute('data-close')); 
-        closeSlot(idx); 
+      grid.addEventListener('click', function (ev){
+        const btn = ev.target.closest('[data-close]');
+        if(!btn) return;
+        const idx = Number(btn.getAttribute('data-close'));
+        closeSlot(idx);
       });
 
       // 分隔条
-      initSplitter(leftWrap, splitter, ()=>{ try{ mapView.resize(); }catch{} });
+      initSplitter(leftWrap, splitter, function(){ try{ mapView.resize(); }catch(e){} });
 
-      // 清空网格状态
+      // 初始化网格状态
       for (let i=0;i<mediaSlots.length;i++) {
         mediaSlots[i].type = null; mediaSlots[i].inst = null; mediaSlots[i].devId=null; mediaSlots[i].devNo=null; mediaSlots[i].modeId=null;
-        const body = document.getElementById(`mediaBody${i}`); if (body) body.setAttribute('data-free','1');
+        const body = document.getElementById('mediaBody'+i);
+        if (body) body.setAttribute('data-free','1');
       }
 
       // 启用：标题栏拖拽 -> 插入式重排（带点击抑制）
       enableGridDragReorder(grid);
-      // 新增：点击打开详情（标题=设备；内容=模式/视频）
+      // 新增：点击打开详情（标题=设备；内容=模式/视频），并统一 hover 手型
       enableGridClickOpen(grid);
 
       // 首屏数据
       bootstrapData(statusPanel.querySelector('#summaryChart'), notifyPanel.querySelector('#notifyList'));
 
       // 路由：外部 WS/Mock 都调用它
-      window.pushModeData = function pushModeData({ devId, modeId, data }) {
+      window.pushModeData = function pushModeData(payload) {
         try {
-          const s = mediaSlots.find(x => x.type==='mode' && String(x.devId)===String(devId) && Number(x.modeId)===Number(modeId));
+          const devId = payload && payload.devId;
+          const modeId = payload && payload.modeId;
+          const data = payload && payload.data;
+          const s = mediaSlots.find(function(x){ return x.type==='mode' && String(x.devId)===String(devId) && Number(x.modeId)===Number(modeId); });
           if (!s || !s.inst || typeof s.inst.setData!=='function') return;
           s.inst.setData(data);
         } catch (e) {
@@ -185,13 +189,14 @@ export function mountSitePage() {
 
       if (ENABLE_MODE_MOCK) startMockFeeder();
     })
-    .catch(err => console.error('[SitePage] template load failed', err));
+    .catch(function (err) { console.error('[SitePage] template load failed', err); });
 }
 
 export function unmountSitePage() {
   stopMockFeeder();
-  try{ mapView?.destroy(); }catch{} mapView=null;
-  if (rootEl){ try{ rootEl.remove(); }catch{} rootEl=null; }
+  try{ if (mapView && typeof mapView.destroy === 'function') mapView.destroy(); }catch(e){}
+  mapView=null;
+  if (rootEl){ try{ rootEl.remove(); }catch(e){} rootEl=null; }
 }
 
 /* ---------------- 左侧树折叠 ---------------- */
@@ -219,18 +224,20 @@ function applyLeftCollapsed(flag){
     leftWrap.style.width = leftWrap.dataset.prevW || '320px';
   }
 }
-function loadCollapsed(){ try{ return localStorage.getItem(KEY_TREE_COLLAPSED) === '1'; } catch { return false; } }
-function saveCollapsed(v){ try{ localStorage.setItem(KEY_TREE_COLLAPSED, v?'1':'0'); } catch {} }
+function loadCollapsed(){ try{ return localStorage.getItem(KEY_TREE_COLLAPSED) === '1'; } catch (e) { return false; } }
+function saveCollapsed(v){ try{ localStorage.setItem(KEY_TREE_COLLAPSED, v?'1':'0'); } catch (e) {} }
 
 /* ---------------- 数据装配（同步 filters 到 siteState） ---------------- */
 async function bootstrapData(summaryEl, notifyEl) {
   try {
-    const [types, modes, online, summary] = await Promise.all([ apiDevTypes(), apiDevModes(), apiOnlineList(), apiDeviceSummary() ]);
+    const arr = await Promise.all([ apiDevTypes(), apiDevModes(), apiOnlineList(), apiDeviceSummary() ]);
+    const types = arr[0], modes = arr[1], online = arr[2], summary = arr[3];
 
     const filters = getFiltersFromTree();
-    try { siteState.set({ filters }); } catch {}
+    try { siteState.set({ filters: filters }); } catch (e) {}
 
-    const [grouped, ungrouped] = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
+    const gu = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
+    const grouped = gu[0], ungrouped = gu[1];
 
     tree.setData({
       groupedDevices: grouped.devList || [],
@@ -240,7 +247,7 @@ async function bootstrapData(summaryEl, notifyEl) {
       devModes: (modes.devModeList || [])
     });
 
-    const all = [...(grouped.devList||[]), ...(ungrouped.devList||[])];
+    const all = [].concat(grouped.devList || [], ungrouped.devList || []);
     mapView.setMarkers(all);
 
     renderSummary(summaryEl, summary);
@@ -254,9 +261,10 @@ async function bootstrapData(summaryEl, notifyEl) {
 async function reloadByFilters() {
   try {
     const filters = getFiltersFromTree();
-    try { siteState.set({ filters }); } catch {}
+    try { siteState.set({ filters: filters }); } catch (e) {}
 
-    const [grouped, ungrouped] = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
+    const gu = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
+    const grouped = gu[0], ungrouped = gu[1];
 
     tree.setData({
       groupedDevices: grouped.devList || [],
@@ -264,7 +272,7 @@ async function reloadByFilters() {
       expandLevel: 2
     });
 
-    const all = [...(grouped.devList||[]), ...(ungrouped.devList||[])];
+    const all = [].concat(grouped.devList || [], ungrouped.devList || []);
     mapView.setMarkers(all);
   } catch (e) {
     console.error('[Site] reloadByFilters error', e);
@@ -272,29 +280,30 @@ async function reloadByFilters() {
 }
 
 function renderSummary(el, summary) {
-  const list = summary?.stateList || [];
-  el.innerHTML = list.map(item => {
+  const list = (summary && summary.stateList) || [];
+  el.innerHTML = list.map(function(item){
     const offline = item.total - item.onlineCount;
-    return `<div style="margin:6px 0;">
-      <div style="font-size:12px;margin-bottom:4px;">${escapeHTML(item.typeName || '')}</div>
-      <div style="display:flex;gap:4px;height:16px;">
-        <div style="flex:${item.onlineCount||0};background:#3d89ff;color:#fff;text-align:center;font-size:11px;line-height:16px;border-radius:3px;">${item.onlineCount||0}</div>
-        <div style="flex:${offline||0};background:#324153;color:#dde;text-align:center;font-size:11px;line-height:16px;border-radius:3px;">${offline||0}</div>
-      </div>
-    </div>`;
+    return '<div style="margin:6px 0;">'
+      + '<div style="font-size:12px;margin-bottom:4px;">' + escapeHTML(item.typeName || '') + '</div>'
+      + '<div style="display:flex;gap:4px;height:16px;">'
+      +   '<div style="flex:'+(item.onlineCount||0)+';background:#3d89ff;color:#fff;text-align:center;font-size:11px;line-height:16px;border-radius:3px;">'+(item.onlineCount||0)+'</div>'
+      +   '<div style="flex:'+(offline||0)+';background:#324153;color:#dde;text-align:center;font-size:11px;line-height:16px;border-radius:3px;">'+(offline||0)+'</div>'
+      + '</div>'
+      + '</div>';
   }).join('');
 }
 function renderNotify(el, list) {
-  el.innerHTML = (list || []).map(l => {
+  el.innerHTML = (list || []).map(function(l){
     const name = l.uname || l.uid;
-    return `<div style="padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.06);font-size:12px;">${fmt(l.time)} ${escapeHTML(String(name))} ${l.online ? '上线' : '下线'}</div>`;
+    return '<div style="padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.06);font-size:12px;">'
+      + fmt(l.time) + ' ' + escapeHTML(String(name)) + ' ' + (l.online ? '上线' : '下线') + '</div>';
   }).join('');
 }
 
 /* ---------------- 分隔条拖拽 ---------------- */
 function initSplitter(leftWrap, splitter, onDrag) {
   const MIN = 240, MAXVW = 50;
-  splitter.addEventListener('mousedown', (e) => {
+  splitter.addEventListener('mousedown', function (e) {
     if (leftWrap.classList.contains('collapsed')) return; // 折叠时不允许拖拽
     const layoutRect = rootEl.getBoundingClientRect();
     const maxPx = Math.floor(window.innerWidth * (MAXVW / 100));
@@ -305,22 +314,22 @@ function initSplitter(leftWrap, splitter, onDrag) {
     });
     document.body.appendChild(glass);
 
-    const move = (ev) => {
-      const x = (ev.clientX ?? 0) - layoutRect.left;
+    const move = function (ev) {
+      const x = (ev.clientX || 0) - layoutRect.left;
       const w = Math.max(MIN, Math.min(Math.round(x), maxPx));
       leftWrap.style.width = w + 'px';
-      onDrag && onDrag();
+      if (onDrag) onDrag();
       ev.preventDefault();
     };
-    const end = () => {
-      try { glass.remove(); } catch {}
+    const end = function () {
+      try { glass.remove(); } catch (e) {}
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', end);
       window.removeEventListener('pointerup', end);
       window.removeEventListener('blur', end);
       document.removeEventListener('visibilitychange', end);
-      requestAnimationFrame(()=> onDrag && onDrag());
-      setTimeout(()=> onDrag && onDrag(), 100);
+      requestAnimationFrame(function(){ if (onDrag) onDrag(); });
+      setTimeout(function(){ if (onDrag) onDrag(); }, 100);
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', end, { once:true });
@@ -337,22 +346,27 @@ function findFreeSlot() {
   const grid = document.getElementById('mediaGrid');
   if (!grid) return -1;
   const orderedCells = Array.from(grid.children);
-  for (const cell of orderedCells) {
+  for (let i=0;i<orderedCells.length;i++) {
+    const cell = orderedCells[i];
     const idx = Number(cell.getAttribute('data-idx'));
-    const body = document.getElementById(`mediaBody${idx}`);
+    const body = document.getElementById('mediaBody'+idx);
     const isFreeDom = body && body.getAttribute('data-free') !== '0';
     if (!mediaSlots[idx].type && isFreeDom) return idx;
   }
   return -1;
 }
 function isModeOpened(devId, modeId){
-  return mediaSlots.some(s => s.type==='mode' && String(s.devId)===String(devId) && Number(s.modeId)===Number(modeId));
+  for (let i=0;i<mediaSlots.length;i++){
+    const s = mediaSlots[i];
+    if (s.type==='mode' && String(s.devId)===String(devId) && Number(s.modeId)===Number(modeId)) return true;
+  }
+  return false;
 }
 async function openVideoInSlot(devId, devNo) {
   const idx = findFreeSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type:'error', message:'没有可用窗口' }); return; }
-  const body = document.getElementById(`mediaBody${idx}`);
-  const title = document.getElementById(`mediaTitle${idx}`);
+  const body = document.getElementById('mediaBody'+idx);
+  const title = document.getElementById('mediaTitle'+idx);
   const vp = createVideoPreview({ objectFit:'fill' });
 
   // 视频容器本身的合成优化
@@ -360,16 +374,22 @@ async function openVideoInSlot(devId, devNo) {
     vp.style.willChange = 'transform';
     vp.style.transform = 'translateZ(0)';
     vp.style.backfaceVisibility = 'hidden';
-    vp.setAttribute?.('tabindex', '-1');
-  } catch {}
+    if (vp && vp.setAttribute) vp.setAttribute('tabindex', '-1');
+  } catch (e) {}
 
-  body.innerHTML = ''; body.appendChild(vp);
+  body.innerHTML = '';
+  body.appendChild(vp);
+
+  // 兜底：画面和内容元素始终显示手型（覆盖播放器默认样式）
+  body.style.cursor = 'pointer';
+  try { vp.style.cursor = 'pointer'; } catch (e) {}
+
   body.setAttribute('data-free','0');
-  title.textContent = `${devNo||''} 视频`;
+  title.textContent = (devNo || '') + ' 视频';
   mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp; mediaSlots[idx].devId = devId; mediaSlots[idx].devNo = devNo; mediaSlots[idx].modeId=null;
 
   try { await vp.play('webrtc://media.szdght.com/1/camera_audio'); }
-  catch {
+  catch (e) {
     eventBus.emit('toast:show', { type:'error', message:'拉流失败' });
     closeSlot(idx);
   }
@@ -379,41 +399,48 @@ function openModeInSlot(devId, devNo, modeId) {
 
   // 同设备同模式只能打开一次
   if (isModeOpened(devId, mid)) {
-    const msg = `${devNo ? devNo + ' ' : ''}${MODE_NAME(mid)}已打开`;
+    const msg = (devNo ? devNo + ' ' : '') + MODE_NAME(mid) + '已打开';
     eventBus.emit('toast:show', { type:'info', message: msg });
     return;
   }
 
   const idx = findFreeSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type:'error', message:'没有可用窗口' }); return; }
-  const body = document.getElementById(`mediaBody${idx}`);
-  const title = document.getElementById(`mediaTitle${idx}`);
+  const body = document.getElementById('mediaBody'+idx);
+  const title = document.getElementById('mediaTitle'+idx);
 
   let mp = null;
-  if (mid === 1) mp = createModeTilt({ devId });
-  else if (mid === 2) mp = createModeDispTilt({ devId });
-  else if (mid === 3) mp = createModeAudio({ devId });
+  if (mid === 1) mp = createModeTilt({ devId: devId });
+  else if (mid === 2) mp = createModeDispTilt({ devId: devId });
+  else if (mid === 3) mp = createModeAudio({ devId: devId });
   else {
     console.warn('[Site] unknown modeId:', modeId, 'use ModePreview fallback');
-    mp = createModePreview({ modeId, devId });
+    mp = createModePreview({ modeId: mid, devId: devId });
   }
 
-  body.innerHTML = ''; body.appendChild(mp.el);
+  body.innerHTML = '';
+  body.appendChild(mp.el);
+
+  // 兜底：画面和内容元素始终显示手型（覆盖 Web Component/Shadow DOM 宿主默认样式）
+  body.style.cursor = 'pointer';
+  try { if (mp.el) mp.el.style.cursor = 'pointer'; } catch (e) {}
+
   body.setAttribute('data-free','0');
-  title.textContent = `${devNo||''} ${MODE_NAME(mid)}`;
+  title.textContent = (devNo || '') + ' ' + MODE_NAME(mid);
   mediaSlots[idx].type = 'mode'; mediaSlots[idx].inst = mp; mediaSlots[idx].devId = devId; mediaSlots[idx].devNo = devNo; mediaSlots[idx].modeId = mid;
 
-  try { mp.start && mp.start(); } catch {}
+  try { if (mp.start) mp.start(); } catch (e) {}
 }
 function closeSlot(idx) {
   const s = mediaSlots[idx]; if (!s) return;
-  if (s.inst?.destroy) { try { s.inst.destroy(); } catch {} }
+  try { if (s.inst && s.inst.destroy) s.inst.destroy(); } catch (e) {}
   s.inst=null; s.type=null; s.devId=null; s.devNo=null; s.modeId=null;
-  const body = document.getElementById(`mediaBody${idx}`);
-  const title = document.getElementById(`mediaTitle${idx}`);
+  const body = document.getElementById('mediaBody'+idx);
+  const title = document.getElementById('mediaTitle'+idx);
   if (body) {
     body.innerHTML = '<div style="color:#567;font-size:12px;">在此显示视频流或模式</div>';
     body.setAttribute('data-free','1');
+    body.style.cursor = '';
   }
   if (title) title.textContent = '空闲';
 }
@@ -422,15 +449,15 @@ function closeSlot(idx) {
 function startMockFeeder(){
   stopMockFeeder();
   console.info('[MOCK] enabled, interval=', MOCK_INTERVAL_MS, 'ms');
-  mockTimer = setInterval(()=>{
-    mediaSlots.forEach(s=>{
+  mockTimer = setInterval(function(){
+    mediaSlots.forEach(function(s){
       if (s.type!=='mode' || s.devId==null || s.modeId==null) return;
       const resp = genMockResponse(s.devId, s.modeId);
-      try { window.pushModeData && window.pushModeData({ devId: s.devId, modeId: s.modeId, data: resp }); } catch(e){ console.warn('[MOCK] push error', e); }
+      try { if (window.pushModeData) window.pushModeData({ devId: s.devId, modeId: s.modeId, data: resp }); } catch(e){ console.warn('[MOCK] push error', e); }
     });
   }, MOCK_INTERVAL_MS);
 }
-function stopMockFeeder(){ try{ mockTimer && clearInterval(mockTimer); }catch{} mockTimer=null; }
+function stopMockFeeder(){ try{ if (mockTimer) clearInterval(mockTimer); }catch(e){} mockTimer=null; }
 
 // ---- MOCK helpers（定义一份，避免重复声明）----
 function getKey(devId, modeId){ return String(devId)+'|'+String(modeId); }
@@ -439,7 +466,7 @@ function ensureState(devId, modeId, init){
   if(!mockState.has(k)) mockState.set(k, init());
   return mockState.get(k);
 }
-function clamp(v,min,max){ return v<min?min:v>max?max:v; }
+function clamp(v,min,max){ return v<min?min:(v>max?max:v); }
 function step(v,amp,min,max){ return clamp(v + (Math.random()*2-1)*amp, min, max); }
 function prob(p){ return Math.random() < p; }
 function rnd(a,b){ return Math.random()*(b-a)+a; }
@@ -448,24 +475,26 @@ function genMockResponse(devId, modeId){
 
   // 倾角
   if (mid===1){
-    const st = ensureState(devId, mid, ()=>({ items: [] }));
+    const st = ensureState(devId, mid, function(){ return { items: [] }; });
     if (!st.items || prob(0.10)) {
       const n = Math.floor(rnd(0,13));
-      st.items = Array.from({length:n},(_,i)=>({
-        name:`倾角${i+1}#`,
-        deg: rnd(0,1.2),
-        batt: rnd(60,100),
-        alarmOn: Math.random()>.2,
-        sirenOn: Math.random()>.2
-      }));
+      st.items = Array.from({length:n}, function(_,i){
+        return {
+          name:'倾角'+(i+1)+'#',
+          deg: rnd(0,1.2),
+          batt: rnd(60,100),
+          alarmOn: Math.random()>.2,
+          sirenOn: Math.random()>.2
+        };
+      });
     }
-    st.items.forEach(it=>{ it.deg = step(it.deg, 0.12, 0, 1.5); });
-    return { items: st.items.slice(0,12).map(x=>({ ...x })) };
+    st.items.forEach(function(it){ it.deg = step(it.deg, 0.12, 0, 1.5); });
+    return { items: st.items.slice(0,12).map(function(x){ return Object.assign({}, x); }) };
   }
 
   // 位移·倾角
   if (mid===2){
-    const st = ensureState(devId, mid, ()=>({ list: [] }));
+    const st = ensureState(devId, mid, function(){ return { list: [] }; });
     if (!st.list || prob(0.10)) {
       const total = Math.floor(rnd(0,13));
       const nDisp = total > 0 ? Math.floor(rnd(0, total+1)) : 0;
@@ -475,25 +504,26 @@ function genMockResponse(devId, modeId){
       for (let i=0;i<nTilt;i++) list.push({ type:'倾角', badge: Math.floor(rnd(60,99)), batt: rnd(60,100), sirenOn: Math.random()>.3, valueDeg: rnd(0,0.30) });
       st.list = list;
     }
-    st.list.forEach(it=>{
+    st.list.forEach(function(it){
       if (it.type==='位移') it.value = step(it.value, 0.002, 0, 0.012);
       else it.valueDeg = step(it.valueDeg, 0.03, 0, 0.30);
     });
     return {
-      items: st.list.slice(0,12).map(it=> it.type==='位移'
-        ? { type:'位移', badge: it.badge, batt: it.batt, sirenOn: it.sirenOn, valueText: it.value.toFixed(3)+'m' }
-        : { type:'倾角', badge: it.badge, batt: it.batt, sirenOn: it.sirenOn, valueText: it.valueDeg.toFixed(2)+'°' }
-      )
+      items: st.list.slice(0,12).map(function(it){
+        return it.type==='位移'
+          ? { type:'位移', badge: it.badge, batt: it.batt, sirenOn: it.sirenOn, valueText: it.value.toFixed(3)+'m' }
+          : { type:'倾角', badge: it.badge, batt: it.batt, sirenOn: it.sirenOn, valueText: it.valueDeg.toFixed(2)+'°' };
+      })
     };
   }
 
   // 音频
-  const st = ensureState(devId, 3, ()=>({ labels:[], values:[], batteries:[] }));
+  const st = ensureState(devId, 3, function(){ return { labels:[], values:[], batteries:[] }; });
   if (!st.values || prob(0.10)) {
     const n = Math.floor(rnd(0,13));
-    st.values = Array.from({length:n}, ()=> rnd(0,100));
-    st.batteries = Array.from({length:n}, ()=> rnd(40,100));
-    st.labels = Array.from({length:n}, (_,i)=> i+1);
+    st.values = Array.from({length:n}, function(){ return rnd(0,100); });
+    st.batteries = Array.from({length:n}, function(){ return rnd(40,100); });
+    st.labels = Array.from({length:n}, function(_,i){ return i+1; });
   }
   for (let i=0;i<st.values.length;i++){
     st.values[i] = Math.max(0, Math.min(100, st.values[i] + (Math.random()*2-1)*8));
@@ -502,17 +532,18 @@ function genMockResponse(devId, modeId){
   return { labels: st.labels.slice(0,12), values: st.values.slice(0,12), batteries: st.batteries.slice(0,12) };
 }
 
-/* ---------------- 拖拽重排（插入式）+ 点击抑制 ---------------- */
+/* ---------------- 拖拽重排（插入式）+ 点击抑制 + 标题按下才显示“移动”光标 ---------------- */
 function enableGridDragReorder(grid) {
   if (!grid) return;
 
-  grid.querySelectorAll('.sp-cell-hd').forEach(hd => {
+  // 让标题栏可拖，关闭按钮不参与拖拽
+  Array.from(grid.querySelectorAll('.sp-cell-hd')).forEach(function(hd){
     hd.setAttribute('draggable', 'true');
     const btn = hd.querySelector('[data-close]');
     if (btn) {
       btn.setAttribute('draggable', 'false');
-      btn.addEventListener('dragstart', e => e.stopPropagation());
-      btn.addEventListener('mousedown', e => e.stopPropagation());
+      btn.addEventListener('dragstart', function(e){ e.stopPropagation(); });
+      btn.addEventListener('mousedown', function(e){ e.stopPropagation(); });
     }
   });
 
@@ -521,26 +552,48 @@ function enableGridDragReorder(grid) {
   let headerDragging = false;
   let suppressHeaderClickUntil = 0;
 
-  grid.addEventListener('dragstart', (e) => {
+  // 标题按下（仅左键）才显示“移动”光标；松开或拖拽结束恢复
+  const showMoveCursor = function (on) {
+    const v = on ? 'move' : '';
+    try { document.documentElement.style.cursor = v; } catch (e) {}
+    try { document.body.style.cursor = v; } catch (e) {}
+  };
+  const releaseMoveCursor = function () { showMoveCursor(false); };
+
+  // 仅对标题栏 mousedown 切换为 move（内容区不要切换）
+  grid.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return; // 只处理左键
     const hd = e.target.closest('.sp-cell-hd');
-    if (!hd || e.target.closest('[data-close]')) { e.preventDefault?.(); return; }
+    if (!hd) return;
+    if (e.target.closest('[data-close]')) return;
+    showMoveCursor(true);
+  }, true);
+  window.addEventListener('mouseup', releaseMoveCursor, true);
+
+  grid.addEventListener('dragstart', function (e) {
+    const hd = e.target.closest('.sp-cell-hd');
+    if (!hd || e.target.closest('[data-close]')) { if (e.preventDefault) e.preventDefault(); return; }
     dragSrcCell = hd.closest('.sp-cell');
     if (!dragSrcCell) return;
-    try { e.dataTransfer.setData('text/plain', dragSrcCell.getAttribute('data-idx') || ''); } catch {}
+    try { e.dataTransfer.setData('text/plain', dragSrcCell.getAttribute('data-idx') || ''); } catch (ex) {}
     e.dataTransfer.effectAllowed = 'move';
     dragSrcCell.classList.add('dragging');
     headerDragging = true;
+    showMoveCursor(true);
   });
-  grid.addEventListener('dragend', () => {
+
+  grid.addEventListener('dragend', function () {
     if (dragSrcCell) dragSrcCell.classList.remove('dragging');
     if (dragOverCell) dragOverCell.classList.remove('drag-target');
     dragSrcCell = null; dragOverCell = null;
     headerDragging = false;
-    suppressHeaderClickUntil = performance.now() + 180;
+    suppressHeaderClickUntil = performance.now() + 180; // 刚拖完抑制误触
+    releaseMoveCursor();
   });
-  grid.addEventListener('dragover', (e) => {
+
+  grid.addEventListener('dragover', function (e) {
     if (!dragSrcCell) return;
-    e.preventDefault(); // 必须阻止默认，drop 才会触发
+    e.preventDefault(); // 必须，drop 才会触发
     e.dataTransfer.dropEffect = 'move';
 
     const cell = e.target.closest('.sp-cell');
@@ -555,7 +608,8 @@ function enableGridDragReorder(grid) {
       dragOverCell.classList.add('drag-target');
     }
   });
-  grid.addEventListener('drop', (e) => {
+
+  grid.addEventListener('drop', function (e) {
     if (!dragSrcCell) return;
     e.preventDefault();
 
@@ -579,20 +633,37 @@ function enableGridDragReorder(grid) {
     dragSrcCell = null; dragOverCell = null;
     headerDragging = false;
     suppressHeaderClickUntil = performance.now() + 180;
+    releaseMoveCursor();
   });
 
-  // 给点击逻辑提供拖拽状态查询
-  grid.__wasHeaderDraggedRecently__ = () => headerDragging || performance.now() < suppressHeaderClickUntil;
+  // 提供给点击逻辑使用：刚拖完 180ms 内忽略标题点击
+  grid.__wasHeaderDraggedRecently__ = function () { return headerDragging || performance.now() < suppressHeaderClickUntil; };
 }
 
-/* ---------------- 点击打开详情（标题=设备；画面=模式/视频） ---------------- */
+/* ---------------- 点击打开详情（标题=设备；画面=模式/视频） + 标题/内容 hover 手型 ---------------- */
 function enableGridClickOpen(grid) {
   if (!grid) return;
 
-  // 标题栏 -> 设备详情
-  grid.addEventListener('click', (e) => {
+  // 用 mouseover/mouseout 代理（可冒泡）
+  grid.addEventListener('mouseover', function (e) {
+    const hd = e.target.closest('.sp-cell-hd');
+    if (hd) { hd.style.cursor = 'pointer'; return; }
+    const body = e.target.closest('.sp-cell-bd');
+    if (body) { body.style.cursor = 'pointer'; }
+  }, true);
+
+  grid.addEventListener('mouseout', function (e) {
+    const hd = e.target.closest('.sp-cell-hd');
+    if (hd) { hd.style.cursor = ''; }
+    const body = e.target.closest('.sp-cell-bd');
+    if (body) { body.style.cursor = ''; }
+  }, true);
+
+  // 标题栏 -> 打开设备详情
+  grid.addEventListener('click', function (e) {
     const hd = e.target.closest('.sp-cell-hd');
     if (!hd) return;
+    // 刚拖完 180ms 内忽略点击
     if (typeof grid.__wasHeaderDraggedRecently__ === 'function' && grid.__wasHeaderDraggedRecently__()) return;
     if (e.target.closest('[data-close]')) return;
     const cell = hd.closest('.sp-cell'); if (!cell) return;
@@ -602,8 +673,8 @@ function enableGridClickOpen(grid) {
     openDeviceDetailOverlay(slot.devId, slot.devNo);
   }, true);
 
-  // 画面 -> 模式/视频详情
-  grid.addEventListener('click', (e) => {
+  // 内容区 -> 打开模式/视频详情
+  grid.addEventListener('click', function (e) {
     const body = e.target.closest('.sp-cell-bd');
     if (!body) return;
     const cell = body.closest('.sp-cell'); if (!cell) return;
@@ -630,7 +701,7 @@ function ensureOverlay() {
   host.appendChild(iframe);
   document.body.appendChild(host);
 
-  const onMsg = (e) => {
+  const onMsg = function (e) {
     const msg = e.data || {};
     if (!msg || !msg.__detail) return;
     if (msg.t === 'back') closeOverlay();
@@ -638,57 +709,58 @@ function ensureOverlay() {
   };
   window.addEventListener('message', onMsg);
 
-  __overlay = { host, iframe, onMsg };
+  __overlay = { host: host, iframe: iframe, onMsg: onMsg };
   return __overlay;
 }
-function openOverlay(url, params={}) {
+function openOverlay(url, params){
   const ov = ensureOverlay();
-  const qs = new URLSearchParams(params); qs.set('_ts', Date.now());
-  ov.iframe.src = `${url}?${qs.toString()}`;
+  const qs = new URLSearchParams(params || {});
+  qs.set('_ts', Date.now());
+  ov.iframe.src = url + '?' + qs.toString();
   ov.host.style.display = 'block';
 }
 function closeOverlay() {
   if (!__overlay) return;
   __overlay.host.style.display = 'none';
-  try { __overlay.iframe.src = 'about:blank'; } catch {}
+  try { __overlay.iframe.src = 'about:blank'; } catch (e) {}
 }
 function openDeviceDetailOverlay(devId, devNo){
-  openOverlay('/modules/features/pages/details/device-detail.html', { devId, devNo });
+  openOverlay('/modules/features/pages/details/device-detail.html', { devId: devId, devNo: devNo });
 }
 function openVideoDetailOverlay(devId, devNo){
-  openOverlay('/modules/features/pages/details/video-detail.html', { devId, devNo, stream:'main' });
+  openOverlay('/modules/features/pages/details/video-detail.html', { devId: devId, devNo: devNo, stream:'main' });
 }
 function openModeDetailOverlay(devId, devNo, modeId){
   const mid = Number(modeId);
   const url = mid===1 ? '/modules/features/pages/details/mode-tilt-detail.html'
             : mid===2 ? '/modules/features/pages/details/mode-disp-tilt-detail.html'
             : '/modules/features/pages/details/mode-audio-detail.html';
-  openOverlay(url, { devId, devNo, modeId: mid });
+  openOverlay(url, { devId: devId, devNo: devNo, modeId: mid });
 }
 
 /* ---------------- 工具 ---------------- */
-function debounce(fn, wait=300) { let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; }
+function debounce(fn, wait){ let t; return function(){ const args=arguments; clearTimeout(t); t=setTimeout(function(){ fn.apply(null, args); }, wait||300); }; }
 function getFiltersFromTree(){ return tree.getFilterValues(); }
-function escapeHTML(str=''){return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function fmt(ts){ if(!ts) return ''; const d=new Date(ts); const p=n=>n<10?'0'+n:n; return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+function escapeHTML(str){ str = String(str||''); return str.replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+function fmt(ts){ if(!ts) return ''; const d=new Date(ts); const p=function(n){return n<10?'0'+n:n;}; return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
 
 /* ---------------- 树设备点击绑定（兼容多事件名） ---------------- */
 function bindTreeDeviceClick(treeEl){
-  const handler = async (e)=>{
-    const devId = e?.detail?.devId ?? e?.detail?.id ?? e?.devId ?? e?.id;
-    const devNo = e?.detail?.devNo ?? e?.detail?.no ?? e?.devNo ?? e?.no;
-    const lastLocation = e?.detail?.lastLocation;
+  const handler = async function (e){
+    const devId = (e && e.detail && (e.detail.devId || e.detail.id)) || e.devId || e.id;
+    const devNo = (e && e.detail && (e.detail.devNo || e.detail.no)) || e.devNo || e.no;
+    const lastLocation = e && e.detail && e.detail.lastLocation;
     if (!devId) { console.warn('[Site][tree] device click missing devId', e); return; }
     try{
-      const data=await apiDeviceInfo(devId);
+      const data = await apiDeviceInfo(devId);
       console.debug('[Site][tree] openDevice with api data', devId);
-      mapView.openDevice({ devInfo: (data && data.devInfo) ? data.devInfo : { id: devId, no: devNo, lastLocation }, followCenterWhenNoLocation:true });
+      mapView.openDevice({ devInfo: (data && data.devInfo) ? data.devInfo : { id: devId, no: devNo, lastLocation: lastLocation }, followCenterWhenNoLocation:true });
     }catch(err){
       console.warn('[Site][tree] apiDeviceInfo failed, fallback openDevice. id=', devId, err);
-      mapView.openDevice({ devInfo: { id: devId, no: devNo, lastLocation }, followCenterWhenNoLocation:true });
+      mapView.openDevice({ devInfo: { id: devId, no: devNo, lastLocation: lastLocation }, followCenterWhenNoLocation:true });
     }
   };
-  ['deviceclick','deviceClick','devclick','dev:click'].forEach(evt=>{
-    try { treeEl.addEventListener(evt, handler); } catch {}
+  ['deviceclick','deviceClick','devclick','dev:click'].forEach(function(evt){
+    try { treeEl.addEventListener(evt, handler); } catch (e) {}
   });
 }
