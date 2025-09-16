@@ -1,11 +1,12 @@
 /**
  * 位移·倾角模式（modeId=2）
- * - 用 Grid（grid-auto-rows:1fr + row-gap:1px）消除底部留白
- * - 行内列布局 + column-gap，宽度变化时等间距挤压
- * - 编号圆更小、1px 细边，跟随视觉行高缩放
+ * - 行高固定为容器高度的 1/12
+ * - 空轨道纯黑显示（不渲染行时底部自然留空）
  */
 export function createModeDispTilt({ devId } = {}) {
   const MAX_ITEMS = 12;
+  const TOTAL_ROWS = 12;
+
   const host = document.createElement('div');
   host.style.alignSelf = 'stretch';
   host.style.width = '100%';
@@ -36,9 +37,8 @@ export function createModeDispTilt({ devId } = {}) {
   function applySizing() {
     if (!wrapEl) return;
     const H = wrapEl.getBoundingClientRect().height;
-    const n = Math.max(1, Math.min(MAX_ITEMS, listEl?.children?.length || MAX_ITEMS));
     const gapY = 1;
-    const rowH = (H - gapY * (n - 1)) / n;
+    const rowH = (H - gapY * (TOTAL_ROWS - 1)) / TOTAL_ROWS;
 
     const fs = clamp(rowH * 0.40, 8, 15);
     const icon = clamp(rowH * 0.56, 10, 18);

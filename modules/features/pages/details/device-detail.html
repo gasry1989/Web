@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>设备详情</title>
+  <style>
+    html,body{height:100%;margin:0;background:#0a0f14;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    *{box-sizing:border-box;}
+    .main{ position:absolute; inset:48px 0 0 0; display:grid; grid-template-columns: 1fr 360px; gap:16px; padding:16px; overflow:hidden; }
+    .left{ overflow:auto; }
+    h3{ margin:10px 0; font-weight:700; }
+    .thumbs{ display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:16px; align-content:start; }
+    .thumb{ aspect-ratio:16/9; background:#000; border:1px solid #334; border-radius:6px; overflow:hidden; display:flex; align-items:center; justify-content:center; color:#9ab; cursor:pointer; position:relative; }
+    .thumb video{ width:100%; height:100%; object-fit:cover; display:block; }
+    .right{ border-left:1px solid #22313f; padding-left:16px; overflow:auto; }
+    .kv{ display:grid; grid-template-columns:120px 1fr; align-items:center; gap:8px; margin:8px 0; }
+    .btn{background:#1f7fb8;border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:600;}
+    .btnLine{ display:flex; gap:12px; margin-top:14px; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { mountTopbar, detailBridge } from './common/detail-common.js';
+    import { STREAMS } from '/config/streams.js';
+    const qs = new URLSearchParams(location.search);
+    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
+    const ui = mountTopbar(document.body);
+    ui.lblDevNo.textContent = devNo || devId || '设备';
+    const bridge = detailBridge();
+    bridge.ready({ page:'device', devId, devNo });
+
+    // 主体 UI
+    const main = document.createElement('div'); main.className='main';
+    main.innerHTML = `
+      <div class="left">
+        <h3>设备屏幕</h3>
+        <div class="thumb" id="thumbScreen" data-kind="video" data-stream="screen"><span>屏幕</span></div>
+        <h3>媒体流</h3>
+        <div class="thumbs">
+          <div class="thumb" id="thumbMain" data-kind="video" data-stream="main"><span>主码流</span></div>
+          <div class="thumb" id="thumbSub" data-kind="video" data-stream="sub"><span>副码流</span></div>
+        </div>
+        <h3>设备模式</h3>
+        <div class="thumbs">
+          <div class="thumb" id="thumbModeTilt" data-kind="mode" data-mode="1"><span>倾角模式</span></div>
+          <div class="thumb" id="thumbModeDispTilt" data-kind="mode" data-mode="2"><span>位移·倾角</span></div>
+          <div class="thumb" id="thumbModeAudio" data-kind="mode" data-mode="3"><span>音频模式</span></div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="kv"><div>设备ID：</div><div id="devIdLbl"></div></div>
+        <div class="kv"><div>设备名称：</div><div id="devNameLbl">--</div></div>
+        <div class="kv"><div>设备类型：</div><div id="devTypeLbl">--</div></div>
+        <div class="kv"><div>支持模式：</div><div id="devModesLbl">--</div></div>
+        <div class="btnLine">
+          <button class="btn" id="btnEditInfo">编辑信息</button>
+          <button class="btn" id="btnEditOwner">编辑属主</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(main);
+    document.getElementById('devIdLbl').textContent = devId;
+
+    // 点击缩略图
+    main.addEventListener('click', (e)=>{
+      const t = e.target.closest('.thumb'); if (!t) return;
+      const kind = t.dataset.kind;
+      if (kind === 'mode') {
+        const modeId = Number(t.dataset.mode);
+        parent.postMessage({ __detail:true, t:'openMode', devId, devNo, modeId }, '*');
+      } else if (kind === 'video') {
+        // 在同遮罩内跳转到视频详情
+        const stream = t.dataset.stream;
+        const streamType = stream === 'screen' ? 'screen' : (stream === 'sub' ? 'sub' : 'main');
+        location.href = `/modules/features/pages/details/video-detail.html?devId=${encodeURIComponent(devId)}&devNo=${encodeURIComponent(devNo)}&stream=${encodeURIComponent(streamType)}`;
+      }
+    });
+
+    // 可按需打开 WS 设备级通道（用于详情右侧信息动态刷新）
+    const ch = await bridge.wsOpen({ kind:'device', devId });
+    bridge.onWsMessage((m)=>{ /* 根据 m.cmd 更新设备信息 */ });
+
+    // 顶栏按钮事件（占位）
+    ui.btnShot.onclick = ()=> bridge.wsSend(ch, { cmd:'deviceShot', to:{type:1,id:devId} });
+    ui.btnRecord.onclick = ()=> bridge.wsSend(ch, { cmd:'deviceRecordToggle', to:{type:1,id:devId} });
+    ui.btnTalk.onclick = ()=> bridge.wsSend(ch, { cmd:'talkToggle', to:{type:1,id:devId} });
+    ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
+  </script>
+</body>
+</html>

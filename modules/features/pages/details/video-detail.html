@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>视频详情</title>
+  <style>
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    *{box-sizing:border-box;}
+    .layout{ position:absolute; inset:48px 0 0 0; display:grid; grid-template-columns: 1fr 320px; }
+    .videoPane{ position:relative; background:#000; }
+    video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+    .side{ border-left:1px solid #1f2a3a; padding:12px; overflow:auto; }
+    .ctl{ display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin:10px 0; }
+    .btn{ background:#1f7fb8; border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:6px; padding:8px; cursor:pointer; text-align:center; }
+    .ptz{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; justify-items:center; align-items:center; margin:12px 0; }
+    .ptz .dir{ width:44px; height:44px; border:2px solid #fff; border-radius:6px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+    .row{ display:flex; align-items:center; justify-content:center; gap:10px; margin:8px 0; }
+    #pip{ position:absolute; right:12px; bottom:12px; width:280px; aspect-ratio:16/9; border:2px solid rgba(255,255,255,.3); border-radius:6px; overflow:hidden; background:#000; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { mountTopbar, detailBridge } from './common/detail-common.js';
+    import { STREAMS } from '/config/streams.js';
+
+    const qs = new URLSearchParams(location.search);
+    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
+    const stream = qs.get('stream') || 'main'; // main/sub/screen
+
+    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNo || devId;
+    const bridge = detailBridge(); bridge.ready({ page:'video', devId, devNo });
+
+    const layout = document.createElement('div'); layout.className='layout';
+    layout.innerHTML = `
+      <div class="videoPane">
+        <video id="mainVideo" autoplay muted playsinline></video>
+        <video id="pip" autoplay muted playsinline></video>
+      </div>
+      <div class="side">
+        <div>通道0</div>
+        <div class="ptz">
+          <div class="dir" id="btnPtzUp">▲</div>
+          <div class="dir" id="btnPtzHome">●</div>
+          <div class="dir" id="btnPtzRight">▶</div>
+          <div class="dir" id="btnPtzLeft">◀</div>
+          <div></div>
+          <div class="dir" id="btnPtzDown">▼</div>
+        </div>
+        <div class="row">
+          <button class="btn" id="btnZoomIn">+</button>
+          <div id="zoomLabel">X1</div>
+          <button class="btn" id="btnZoomOut">-</button>
+        </div>
+        <div class="ctl">
+          <div class="btn" id="btnReconnect">重连</div>
+          <div class="btn" id="btnFlash">闪光灯</div>
+          <div></div>
+          <div class="btn" id="btnShot2">拍照</div>
+          <div class="btn" id="btnRecord2">录像</div>
+          <div class="btn" id="btnFullscreen">全屏</div>
+        </div>
+        <div class="ctl">
+          <div class="btn" id="btnToggleVideo">打开/关闭视频</div>
+          <div class="btn" id="btnSwitchChannel">切换</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(layout);
+
+    const mainVideo = layout.querySelector('#mainVideo');
+    const pip = layout.querySelector('#pip');
+
+    // 拉流（占位：这里使用 <video>，真实 webrtc 请对接你的播放器）
+    function play(url, el){ try { el.src = ''; el.srcObject = null; el.src = url; } catch {} }
+    const urlMap = { main: STREAMS.main, sub: STREAMS.sub, screen: STREAMS.screen };
+    play(urlMap[stream] || STREAMS.main, mainVideo);
+
+    // WS 通道（视频控制）
+    const ch = await bridge.wsOpen({ kind:'video', devId });
+    const to = { type: 1, id: devId };
+
+    // 顶栏按钮
+    ui.btnShot.onclick   = ()=> bridge.wsSend(ch, { cmd:'videoShot', to });
+    ui.btnRecord.onclick = ()=> bridge.wsSend(ch, { cmd:'videoRecordToggle', to });
+    ui.btnTalk.onclick   = ()=> bridge.wsSend(ch, { cmd:'talkToggle', to });
+    ui.btnBack.onclick   = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
+
+    // 侧栏按钮
+    const bind = (id, cmd, data={})=> layout.querySelector('#'+id).onclick = ()=> bridge.wsSend(ch, { cmd, to, data });
+    bind('btnPtzUp','ptz', { dir:'up' });
+    bind('btnPtzDown','ptz', { dir:'down' });
+    bind('btnPtzLeft','ptz', { dir:'left' });
+    bind('btnPtzRight','ptz', { dir:'right' });
+    bind('btnPtzHome','ptz', { dir:'home' });
+    bind('btnZoomIn','zoom', { step:+1 });
+    bind('btnZoomOut','zoom', { step:-1 });
+    bind('btnReconnect','videoReconnect');
+    bind('btnFlash','flashToggle');
+    bind('btnShot2','videoShot');
+    bind('btnRecord2','videoRecordToggle');
+    bind('btnFullscreen','videoFullscreen');
+    bind('btnToggleVideo','videoToggle');
+    bind('btnSwitchChannel','videoSwitch');
+
+    bridge.onWsMessage((m)=>{ /* 处理视频事件，如进度、错误等 */ });
+  </script>
+</body>
+</html>

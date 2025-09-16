@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>位移·倾角模式详情</title>
+  <style>
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    *{box-sizing:border-box;}
+    .wrap{ position:absolute; inset:48px 0 0 0; color:#e6f0ff; padding:10px 14px; overflow:auto;}
+    .panel{ border:1px solid #2ea6a6; border-radius:6px; padding:10px; margin-bottom:12px; }
+    .title{ font-size:18px; text-align:center; margin-bottom:8px; }
+    .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+    .row{ display:grid; grid-template-columns: auto auto auto 1fr; align-items:center; column-gap:10px; border-bottom:1px solid #1f2a3a; padding:10px 0; }
+    .badge{ width:24px;height:24px;border-radius:50%;border:1px solid #48c2ff;color:#48c2ff;display:flex;align-items:center;justify-content:center;font-weight:700;}
+    .wifi::before{ content:''; width:18px; height:14px; background:
+      radial-gradient(circle at 4px 14px,#fff 2px,transparent 3px),
+      radial-gradient(circle at 9px 9px, #fff 2px, transparent 3px),
+      radial-gradient(circle at 14px 4px,#fff 2px,transparent 3px); display:inline-block; }
+    .batt{ position:relative; width:36px; height:14px; border:2px solid #9f9; border-radius:2px;}
+    .batt::after{ content:''; position:absolute; right:-5px; top:3px; width:3px; height:8px; background:#9f9; }
+    .batt .fill{ position:absolute; left:0; top:0; bottom:0; width:70%; background:#27e65e;}
+    .siren{ width:22px; height:22px; border-radius:50%; border:2px solid #fff; display:inline-flex; align-items:center; justify-content:center;}
+    .val{ color:#aefcae; font-weight:700; text-align:right; }
+    .rightBox{ border:1px solid #2ea6a6; border-radius:6px; padding:10px; }
+    .kv{ display:grid; grid-template-columns: 90px 1fr auto; align-items:center; column-gap:10px; padding:6px 0; }
+    .inputBox{ border:2px solid #2ea6a6; border-radius:6px; padding:8px 10px; min-width:120px; text-align:center; font-weight:700; background:#0c141a; color:#aefcae;}
+    .wave{ height:40px; background:
+      linear-gradient(0deg, rgba(46,166,166,.35) 2px, transparent 2px) repeat-y 0 0/100% 10px,
+      linear-gradient(90deg, rgba(46,166,166,.35) 2px, transparent 2px) repeat-x 0 0/60px 100%;
+      border:2px solid #2ea6a6; border-radius:6px; }
+    .log{ border:1px solid #2ea6a6; border-radius:6px; padding:10px; margin-top:10px; }
+    .logTitle{ text-align:center; margin-bottom:6px; }
+    .logList{ font-family: ui-monospace,Consolas,monospace; line-height:1.8; }
+    .btnTiny{ padding:6px 10px; border-radius:6px; background:#1f7fb8; border:1px solid rgba(255,255,255,.25); color:#fff; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { mountTopbar, detailBridge } from './common/detail-common.js';
+    const qs = new URLSearchParams(location.search);
+    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
+    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNo || devId;
+    const bridge = detailBridge(); bridge.ready({ page:'mode-disp-tilt', devId, devNo });
+
+    const wrap = document.createElement('div'); wrap.className='wrap';
+    wrap.innerHTML = `
+      <div class="panel">
+        <div class="title">设备名称/编号 - 在线：3台</div>
+        <div class="grid">
+          <div id="leftList">
+            <div class="row"><span>位移</span><span class="badge">20</span><span class="wifi"></span><span class="batt"><span class="fill"></span></span><span class="siren">⎍</span><span class="val">0.000m</span></div>
+            <div class="row"><span>位移</span><span class="badge">89</span><span class="wifi"></span><span class="batt"><span class="fill"></span></span><span class="siren">⎍</span><span class="val">0.000m</span></div>
+            <div class="row" style="border:2px solid #2ea6a6; border-radius:6px; padding:10px;">
+              <span>倾角</span><span class="badge">93</span><span class="wifi"></span><span class="batt"><span class="fill" style="width:70%"></span></span><span class="siren">⎍</span><span class="val">0.00°</span>
+            </div>
+          </div>
+          <div class="rightBox">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div>
+                <div class="kv"><span>角 度：</span><span>X：-0.06°<br/>Y：0.01°<br/>Z：2.14°</span></div>
+                <div class="kv"><span>距离：</span><span style="color:#2af08b;font-weight:700;">2.448</span><span>m</span></div>
+                <div class="kv"><span>移动值：</span><span style="color:#2af08b;font-weight:700;">0.000</span><span>m</span></div>
+                <div class="log">
+                  <div class="logTitle">数据记录</div>
+                  <div class="logList" id="logList">
+                    2025-06-26 14:49:34 关闭监控<br/>
+                    2025-06-26 14:49:28 开启监控<br/>
+                    2025-06-26 14:45:14 报警复位<br/>
+                    2025-06-26 14:45:14 震动报警 中灵敏度
+                  </div>
+                  <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end;">
+                    <button class="btnTiny" id="btnLogAll">全部</button>
+                    <button class="btnTiny" id="btnLogFilter">筛选 ⬆</button>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div class="kv"><span>报警值</span><div class="inputBox" id="boxTiltThresh">0.3°</div><div class="btnTiny" id="btnTiltThreshDec">◀</div></div>
+                <div class="kv"><span>移动值</span><div class="inputBox" id="boxMoveVal">0.00°</div><div class="wave"></div></div>
+                <div class="kv"><span>模式：</span><div class="inputBox" id="boxModeName">中灵敏度</div></div>
+                <div class="kv"><span>报警值</span><div class="inputBox" id="boxMoveThresh">3.330</div><div class="btnTiny" id="btnMoveThreshDec">◀</div></div>
+              </div>
+            </div>
+            <div style="margin-top:8px; color:#8fb;">气压：998.823 hps　　海拔：120.09 m</div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    // WS 打开并请求模式数据
+    const ch = await bridge.wsOpen({ kind:'mode', devId, modeId: 2 });
+    bridge.wsSend(ch, {
+      cmd: 'modeData',
+      to: { type: 1, id: devId },
+      data: { modeId: 200 }
+    });
+    bridge.onWsMessage((m)=>{ if (m.cmd==='modeDataResponse' && m.code===0) { /* 渲染 */ } });
+
+    // 顶栏
+    ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
+  </script>
+</body>
+</html>

@@ -1,12 +1,12 @@
 /**
  * 倾角模式（modeId=1）
- * - #list 用 Grid：grid-auto-rows:1fr + row-gap:1px，永远无底部留白
- * - 分隔线由 row-gap 显示，不再给每行加 border
- * - 依据“可用高度 - (行数-1)*1px”推导出视觉行高，用来缩放字体/图标/电量条
- * - 行内布局改为列网格 + column-gap 等距分布
+ * - 行高固定为容器高度的 1/12
+ * - 空轨道纯黑显示（不渲染行时底部自然留空）
  */
 export function createModeTilt({ devId } = {}) {
   const MAX_ITEMS = 12;
+  const TOTAL_ROWS = 12;
+
   const host = document.createElement('div');
   host.style.alignSelf = 'stretch';
   host.style.width = '100%';
@@ -38,9 +38,8 @@ export function createModeTilt({ devId } = {}) {
   function applySizing() {
     if (!wrapEl) return;
     const H = wrapEl.getBoundingClientRect().height;
-    const n = Math.max(1, Math.min(MAX_ITEMS, listEl?.children?.length || MAX_ITEMS));
     const gapY = 1;
-    const rowH = (H - gapY * (n - 1)) / n;  // 小数像素，Grid 负责分配，底部不留白
+    const rowH = (H - gapY * (TOTAL_ROWS - 1)) / TOTAL_ROWS;
 
     const fs = clamp(rowH * 0.42, 8, 15);
     const icon = clamp(rowH * 0.58, 10, 18);
@@ -48,7 +47,7 @@ export function createModeTilt({ devId } = {}) {
     const battW = clamp(rowH * 1.35, 24, 44);
     const capW = clamp(battH * 0.38, 2.5, 5.5);
     const capH = clamp(battH * 0.78, 3, 8);
-    const hgap = clamp(rowH * 0.35, 6, 14); // 行内列间距，随宽度均匀挤压
+    const hgap = clamp(rowH * 0.35, 6, 14);
 
     host.style.setProperty('--fs', fs + 'px');
     host.style.setProperty('--icon', icon + 'px');
@@ -81,7 +80,7 @@ export function createModeTilt({ devId } = {}) {
       listEl.innerHTML = '';
       rows = items.map(() => makeRow());
       rows.forEach(r => listEl.appendChild(r.row));
-      applySizing(); // 行数变化后重算
+      applySizing();
     }
     for (let i = 0; i < n; i++) {
       const it = items[i], r = rows[i];

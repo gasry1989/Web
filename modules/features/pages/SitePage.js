@@ -1,9 +1,11 @@
 /**
  * SitePage（装配）
- * 变更要点：
- * - 标题栏拖拽：支持“插入式重排”（把A插到B的前/后，其他顺位挤开）
- * - findFreeSlot 改为按当前 DOM 顺序（可视顺序）寻找空位
- * - 修复：树点击未分组设备时接口失败被吞，导致信息窗不弹。现在失败也会兜底打开信息窗并打印 warn。
+ * 本版改动要点：
+ * - 树状栏设备点击事件兼容多名称（deviceclick/deviceClick/devclick/dev:click），失败兜底也能弹出信息窗
+ * - 网格标题/内容点击：标题=设备详情；内容=模式/视频详情（enableGridClickOpen）
+ * - 标题栏拖拽重排（插入式）并在短时间内抑制误触点击
+ * - Overlay（iframe 全屏）打开 5 个详情页（设备/视频/三种模式）
+ * - 维持原有 Mock 模式推送；openVideoInSlot 继续拉主码流占位
  */
 import { createTreePanel } from './components/TreePanel.js';
 import { createVideoPreview } from './modes/VideoPreview.js';
@@ -22,7 +24,6 @@ import {
 import { eventBus } from '@core/eventBus.js';
 import { importTemplate } from '@ui/templateLoader.js';
 
-const SRS_FIXED_URL = 'webrtc://media.szdght.com/1/camera_audio';
 const KEY_TREE_COLLAPSED = 'ui.sitepage.tree.collapsed';
 
 // 本地模拟喂数（默认开启，可用 URL ?mock=0 关闭）
@@ -30,16 +31,12 @@ const urlParams = new URLSearchParams(location.search);
 const ENABLE_MODE_MOCK = urlParams.get('mock') != null ? urlParams.get('mock') === '1' : true;
 const MOCK_INTERVAL_MS = 300;
 
-let __prevHtmlOverflow = '';
-let __prevBodyOverflow = '';
-let __prevMainStyle = null;
-
 let rootEl = null;
 let tree = null;
 let mapView = null;
 
-// 网格 6 格
-const mediaSlots = Array.from({ length: 6 }, (_, i) => ({ idx:i, type:null, inst:null, devId:null, modeId:null }));
+// 网格 6 格（带 devNo 以便详情用）
+const mediaSlots = Array.from({ length: 6 }, (_, i) => ({ idx:i, type:null, inst:null, devId:null, devNo:null, modeId:null }));
 
 // MOCK 状态
 const mockState = new Map();
@@ -49,20 +46,19 @@ const MODE_NAME = (mid)=>{
   switch(Number(mid)){
     case 1: return '倾角模式';
     case 2: return '位移·倾角模式';
-    case 3: return '音视频模式';
+    case 3: return '音频模式';
     default: return '模式';
   }
 };
 
 export function mountSitePage() {
-  __prevHtmlOverflow = document.documentElement.style.overflow;
-  __prevBodyOverflow = document.body.style.overflow;
   document.documentElement.style.overflow = 'hidden';
   document.body.style.overflow = 'hidden';
 
   const main = document.getElementById('mainView');
-  __prevMainStyle = { padding: main.style.padding, overflow: main.style.overflow, position: main.style.position, height: main.style.height };
-  main.innerHTML = ''; main.style.padding = '0'; main.style.overflow = 'hidden';
+  main.innerHTML = '';
+  main.style.padding = '0';
+  main.style.overflow = 'hidden';
   if (!getComputedStyle(main).position || getComputedStyle(main).position === 'static') main.style.position = 'relative';
 
   const fitMainHeight = () => {
@@ -70,7 +66,8 @@ export function mountSitePage() {
     const h = window.innerHeight - top;
     if (h > 0) main.style.height = h + 'px';
   };
-  fitMainHeight(); window.addEventListener('resize', fitMainHeight);
+  fitMainHeight();
+  window.addEventListener('resize', fitMainHeight);
 
   importTemplate('/modules/features/pages/site-page.html', 'tpl-site-page')
     .then(async (frag) => {
@@ -124,10 +121,17 @@ export function mountSitePage() {
       mapMount.appendChild(mapView);
       mapView.mount();
 
-      // 打开视频/模式/刷新事件
+      // 打开视频/模式/刷新/标注点击/详情
       mapView.addEventListener('openVideo', (e)=> openVideoInSlot(e.detail.devId, e.detail.devNo));
       mapView.addEventListener('openMode',  (e)=> openModeInSlot(e.detail.devId, e.detail.devNo, e.detail.modeId));
-      mapView.addEventListener('refreshDevice', async (e)=>{ try{ const data=await apiDeviceInfo(e.detail.devId); mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); }catch(err){ console.warn('[Site] refreshDevice api error, keep window, id=', e.detail.devId, err); } });
+      mapView.addEventListener('refreshDevice', async (e)=>{ 
+        try{ 
+          const data=await apiDeviceInfo(e.detail.devId); 
+          mapView.openDevice({ devInfo:data.devInfo, followCenterWhenNoLocation:true }); 
+        }catch(err){ 
+          console.warn('[Site] refreshDevice api error, keep window, id=', e.detail.devId, err); 
+        } 
+      });
       mapView.addEventListener('markerClick', async (e) => {
         try {
           const data = await apiDeviceInfo(e.detail.devId);
@@ -137,33 +141,32 @@ export function mountSitePage() {
           mapView.openDevice({ devInfo: { id: e.detail.devId, devNo: e.detail.devNo }, followCenterWhenNoLocation: true });
         }
       });
+      mapView.addEventListener('openDetail', (e)=> openDeviceDetailOverlay(e.detail.devId, e.detail.devNo));
 
-      // 树点击 -> 信息窗（修复：接口失败也兜底打开，且输出 warn）
-      tree.addEventListener('deviceclick', async (e)=>{
-        const devId = e.detail?.devId;
-        try{
-          const data = await apiDeviceInfo(devId);
-          mapView.openDevice({ devInfo: (data && data.devInfo) ? data.devInfo : { id: devId, no: e.detail?.devNo, lastLocation: e.detail?.lastLocation }, followCenterWhenNoLocation:true });
-        }catch(err){
-          console.warn('[Site] deviceclick apiDeviceInfo failed, fallback openDevice. id=', devId, err);
-          mapView.openDevice({ devInfo: { id: devId, no: e.detail?.devNo, lastLocation: e.detail?.lastLocation }, followCenterWhenNoLocation:true });
-        }
-      });
+      // 树点击 -> 信息窗（兼容多事件名 + 兜底 + 调试日志）
+      bindTreeDeviceClick(tree);
 
       // 媒体关闭
-      grid.addEventListener('click', (ev)=>{ const btn=ev.target.closest('[data-close]'); if(!btn) return; const idx=Number(btn.getAttribute('data-close')); closeSlot(idx); });
+      grid.addEventListener('click', (ev)=>{ 
+        const btn=ev.target.closest('[data-close]'); 
+        if(!btn) return; 
+        const idx=Number(btn.getAttribute('data-close')); 
+        closeSlot(idx); 
+      });
 
       // 分隔条
       initSplitter(leftWrap, splitter, ()=>{ try{ mapView.resize(); }catch{} });
 
       // 清空网格状态
       for (let i=0;i<mediaSlots.length;i++) {
-        mediaSlots[i].type = null; mediaSlots[i].inst = null; mediaSlots[i].devId=null; mediaSlots[i].modeId=null;
+        mediaSlots[i].type = null; mediaSlots[i].inst = null; mediaSlots[i].devId=null; mediaSlots[i].devNo=null; mediaSlots[i].modeId=null;
         const body = document.getElementById(`mediaBody${i}`); if (body) body.setAttribute('data-free','1');
       }
 
-      // 启用：标题栏拖拽 -> 插入式重排
+      // 启用：标题栏拖拽 -> 插入式重排（带点击抑制）
       enableGridDragReorder(grid);
+      // 新增：点击打开详情（标题=设备；内容=模式/视频）
+      enableGridClickOpen(grid);
 
       // 首屏数据
       bootstrapData(statusPanel.querySelector('#summaryChart'), notifyPanel.querySelector('#notifyList'));
@@ -186,14 +189,9 @@ export function mountSitePage() {
 }
 
 export function unmountSitePage() {
-  document.documentElement.style.overflow = __prevHtmlOverflow;
-  document.body.style.overflow = __prevBodyOverflow;
   stopMockFeeder();
-  mediaSlots.forEach(s=>{ if(s.inst?.destroy){ try{s.inst.destroy();}catch{} } s.inst=null; s.type=null; s.devId=null; s.modeId=null; });
   try{ mapView?.destroy(); }catch{} mapView=null;
   if (rootEl){ try{ rootEl.remove(); }catch{} rootEl=null; }
-  const main=document.getElementById('mainView');
-  if (__prevMainStyle && main) { main.style.padding=__prevMainStyle.padding; main.style.overflow=__prevMainStyle.overflow; main.style.position=__prevMainStyle.position; main.style.height=__prevMainStyle.height; }
 }
 
 /* ---------------- 左侧树折叠 ---------------- */
@@ -367,10 +365,10 @@ async function openVideoInSlot(devId, devNo) {
 
   body.innerHTML = ''; body.appendChild(vp);
   body.setAttribute('data-free','0');
-  title.textContent = `${devNo} 视频`;
-  mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp; mediaSlots[idx].devId=null; mediaSlots[idx].modeId=null;
+  title.textContent = `${devNo||''} 视频`;
+  mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp; mediaSlots[idx].devId = devId; mediaSlots[idx].devNo = devNo; mediaSlots[idx].modeId=null;
 
-  try { await vp.play(SRS_FIXED_URL); }
+  try { await vp.play('webrtc://media.szdght.com/1/camera_audio'); }
   catch {
     eventBus.emit('toast:show', { type:'error', message:'拉流失败' });
     closeSlot(idx);
@@ -402,15 +400,15 @@ function openModeInSlot(devId, devNo, modeId) {
 
   body.innerHTML = ''; body.appendChild(mp.el);
   body.setAttribute('data-free','0');
-  title.textContent = `${devNo} ${MODE_NAME(mid)}`;
-  mediaSlots[idx].type = 'mode'; mediaSlots[idx].inst = mp; mediaSlots[idx].devId = devId; mediaSlots[idx].modeId = mid;
+  title.textContent = `${devNo||''} ${MODE_NAME(mid)}`;
+  mediaSlots[idx].type = 'mode'; mediaSlots[idx].inst = mp; mediaSlots[idx].devId = devId; mediaSlots[idx].devNo = devNo; mediaSlots[idx].modeId = mid;
 
   try { mp.start && mp.start(); } catch {}
 }
 function closeSlot(idx) {
   const s = mediaSlots[idx]; if (!s) return;
   if (s.inst?.destroy) { try { s.inst.destroy(); } catch {} }
-  s.inst=null; s.type=null; s.devId=null; s.modeId=null;
+  s.inst=null; s.type=null; s.devId=null; s.devNo=null; s.modeId=null;
   const body = document.getElementById(`mediaBody${idx}`);
   const title = document.getElementById(`mediaTitle${idx}`);
   if (body) {
@@ -427,10 +425,7 @@ function startMockFeeder(){
   mockTimer = setInterval(()=>{
     mediaSlots.forEach(s=>{
       if (s.type!=='mode' || s.devId==null || s.modeId==null) return;
-      const sendPayload = { t:'mode_pull', devId: s.devId, modeId: s.modeId };
-      console.debug('[MOCK][send]', JSON.stringify(sendPayload));
       const resp = genMockResponse(s.devId, s.modeId);
-      console.debug('[MOCK][recv]', JSON.stringify({ t:'mode_data', devId:s.devId, modeId:s.modeId, preview: previewForLog(resp)}));
       try { window.pushModeData && window.pushModeData({ devId: s.devId, modeId: s.modeId, data: resp }); } catch(e){ console.warn('[MOCK] push error', e); }
     });
   }, MOCK_INTERVAL_MS);
@@ -448,32 +443,14 @@ function clamp(v,min,max){ return v<min?min:v>max?max:v; }
 function step(v,amp,min,max){ return clamp(v + (Math.random()*2-1)*amp, min, max); }
 function prob(p){ return Math.random() < p; }
 function rnd(a,b){ return Math.random()*(b-a)+a; }
-function previewForLog(d){
-  if (d && Array.isArray(d.items)) return { n:d.items.length, first:d.items[0] };
-  return { n:(d?.values?.length||0), first:d?.values?.[0] };
-}
-
-/**
- * 生成本地演示用回包：结构与三个模式组件 setData 形参一致
- * - modeId=1 倾角：items 长度 0~4 随机
- * - modeId=2 位移·倾角：位移/倾角数量独立波动
- * - modeId=3 音视频柱状：values/labels/batteries 长度 0~5 随机
- */
-/* —— 顶部常量附近新增 —— */
-const MOCK_COUNT_PARAM = '12';//urlParams.get('mockCount');
-const MOCK_FIXED_COUNT = (MOCK_COUNT_PARAM && MOCK_COUNT_PARAM !== 'auto')
-  ? Math.max(0, Math.min(12, parseInt(MOCK_COUNT_PARAM) || 12))
-  : null;
-
-/* —— 保持其余代码不变，替换 genMockResponse 为以下实现 —— */
 function genMockResponse(devId, modeId){
   const mid = Number(modeId);
 
-  // 倾角：0~12 个；若 MOCK_FIXED_COUNT !== null 则固定为该数量
+  // 倾角
   if (mid===1){
     const st = ensureState(devId, mid, ()=>({ items: [] }));
     if (!st.items || prob(0.10)) {
-      const n = (MOCK_FIXED_COUNT != null) ? MOCK_FIXED_COUNT : Math.floor(rnd(0,13));
+      const n = Math.floor(rnd(0,13));
       st.items = Array.from({length:n},(_,i)=>({
         name:`倾角${i+1}#`,
         deg: rnd(0,1.2),
@@ -482,21 +459,15 @@ function genMockResponse(devId, modeId){
         sirenOn: Math.random()>.2
       }));
     }
-    st.items.forEach(it=>{
-      it.deg = step(it.deg, 0.12, 0, 1.5);
-      if (prob(0.05)) it.alarmOn = !it.alarmOn;
-      if (prob(0.05)) it.sirenOn = !it.sirenOn;
-      if (prob(0.02)) it.batt = Math.max(0, it.batt - 1);
-    });
+    st.items.forEach(it=>{ it.deg = step(it.deg, 0.12, 0, 1.5); });
     return { items: st.items.slice(0,12).map(x=>({ ...x })) };
   }
 
-  // 位移·倾角：总数 0~12；若 MOCK_FIXED_COUNT !== null 则总数固定
+  // 位移·倾角
   if (mid===2){
     const st = ensureState(devId, mid, ()=>({ list: [] }));
     if (!st.list || prob(0.10)) {
-      const total = (MOCK_FIXED_COUNT != null) ? MOCK_FIXED_COUNT : Math.floor(rnd(0,13));
-      // 随机拆分位移/倾角，但两者之和恒等于 total
+      const total = Math.floor(rnd(0,13));
       const nDisp = total > 0 ? Math.floor(rnd(0, total+1)) : 0;
       const nTilt = total - nDisp;
       const list = [];
@@ -507,9 +478,6 @@ function genMockResponse(devId, modeId){
     st.list.forEach(it=>{
       if (it.type==='位移') it.value = step(it.value, 0.002, 0, 0.012);
       else it.valueDeg = step(it.valueDeg, 0.03, 0, 0.30);
-      if (prob(0.04)) it.sirenOn = !it.sirenOn;
-      if (prob(0.02)) it.badge = Math.max(0, Math.min(99, (it.badge|0) + (Math.random()<.5?-1:1)));
-      if (prob(0.02)) it.batt = Math.max(0, it.batt - 1);
     });
     return {
       items: st.list.slice(0,12).map(it=> it.type==='位移'
@@ -519,14 +487,13 @@ function genMockResponse(devId, modeId){
     };
   }
 
-  // 音频柱状：0~12 根；若 MOCK_FIXED_COUNT !== null 则固定为该数量
+  // 音频
   const st = ensureState(devId, 3, ()=>({ labels:[], values:[], batteries:[] }));
   if (!st.values || prob(0.10)) {
-    const n = (MOCK_FIXED_COUNT != null) ? MOCK_FIXED_COUNT : Math.floor(rnd(0,13));
+    const n = Math.floor(rnd(0,13));
     st.values = Array.from({length:n}, ()=> rnd(0,100));
     st.batteries = Array.from({length:n}, ()=> rnd(40,100));
     st.labels = Array.from({length:n}, (_,i)=> i+1);
-    if (n>0 && prob(0.30)) st.labels[n-1] = 10; // 偶尔末尾为 10（仅示例）
   }
   for (let i=0;i<st.values.length;i++){
     st.values[i] = Math.max(0, Math.min(100, st.values[i] + (Math.random()*2-1)*8));
@@ -535,11 +502,10 @@ function genMockResponse(devId, modeId){
   return { labels: st.labels.slice(0,12), values: st.values.slice(0,12), batteries: st.batteries.slice(0,12) };
 }
 
-/* ---------------- 拖拽重排（插入式）仅限 6 个媒体窗口 ---------------- */
+/* ---------------- 拖拽重排（插入式）+ 点击抑制 ---------------- */
 function enableGridDragReorder(grid) {
   if (!grid) return;
 
-  // 标题栏作为拖拽把手，关闭按钮不参与拖拽
   grid.querySelectorAll('.sp-cell-hd').forEach(hd => {
     hd.setAttribute('draggable', 'true');
     const btn = hd.querySelector('[data-close]');
@@ -552,6 +518,8 @@ function enableGridDragReorder(grid) {
 
   let dragSrcCell = null;
   let dragOverCell = null;
+  let headerDragging = false;
+  let suppressHeaderClickUntil = 0;
 
   grid.addEventListener('dragstart', (e) => {
     const hd = e.target.closest('.sp-cell-hd');
@@ -561,14 +529,15 @@ function enableGridDragReorder(grid) {
     try { e.dataTransfer.setData('text/plain', dragSrcCell.getAttribute('data-idx') || ''); } catch {}
     e.dataTransfer.effectAllowed = 'move';
     dragSrcCell.classList.add('dragging');
+    headerDragging = true;
   });
-
   grid.addEventListener('dragend', () => {
     if (dragSrcCell) dragSrcCell.classList.remove('dragging');
     if (dragOverCell) dragOverCell.classList.remove('drag-target');
     dragSrcCell = null; dragOverCell = null;
+    headerDragging = false;
+    suppressHeaderClickUntil = performance.now() + 180;
   });
-
   grid.addEventListener('dragover', (e) => {
     if (!dragSrcCell) return;
     e.preventDefault(); // 必须阻止默认，drop 才会触发
@@ -586,7 +555,6 @@ function enableGridDragReorder(grid) {
       dragOverCell.classList.add('drag-target');
     }
   });
-
   grid.addEventListener('drop', (e) => {
     if (!dragSrcCell) return;
     e.preventDefault();
@@ -609,7 +577,93 @@ function enableGridDragReorder(grid) {
     dragSrcCell.classList.remove('dragging');
     if (dragOverCell) dragOverCell.classList.remove('drag-target');
     dragSrcCell = null; dragOverCell = null;
+    headerDragging = false;
+    suppressHeaderClickUntil = performance.now() + 180;
   });
+
+  // 给点击逻辑提供拖拽状态查询
+  grid.__wasHeaderDraggedRecently__ = () => headerDragging || performance.now() < suppressHeaderClickUntil;
+}
+
+/* ---------------- 点击打开详情（标题=设备；画面=模式/视频） ---------------- */
+function enableGridClickOpen(grid) {
+  if (!grid) return;
+
+  // 标题栏 -> 设备详情
+  grid.addEventListener('click', (e) => {
+    const hd = e.target.closest('.sp-cell-hd');
+    if (!hd) return;
+    if (typeof grid.__wasHeaderDraggedRecently__ === 'function' && grid.__wasHeaderDraggedRecently__()) return;
+    if (e.target.closest('[data-close]')) return;
+    const cell = hd.closest('.sp-cell'); if (!cell) return;
+    const idx = Number(cell.getAttribute('data-idx'));
+    const slot = mediaSlots[idx];
+    if (!slot || !slot.devId) return;
+    openDeviceDetailOverlay(slot.devId, slot.devNo);
+  }, true);
+
+  // 画面 -> 模式/视频详情
+  grid.addEventListener('click', (e) => {
+    const body = e.target.closest('.sp-cell-bd');
+    if (!body) return;
+    const cell = body.closest('.sp-cell'); if (!cell) return;
+    const idx = Number(cell.getAttribute('data-idx'));
+    const slot = mediaSlots[idx];
+    if (!slot) return;
+
+    if (slot.type === 'mode' && slot.devId && slot.modeId) {
+      openModeDetailOverlay(slot.devId, slot.devNo, slot.modeId);
+    } else if (slot.type === 'video' && slot.devId) {
+      openVideoDetailOverlay(slot.devId, slot.devNo);
+    }
+  }, true);
+}
+
+/* ---------------- Overlay（iframe 全屏） ---------------- */
+let __overlay = null;
+function ensureOverlay() {
+  if (__overlay && document.body.contains(__overlay.host)) return __overlay;
+  const host = document.createElement('div');
+  Object.assign(host.style, { position:'fixed', inset:'0', background:'#000', zIndex:'2147483645', display:'none' });
+  const iframe = document.createElement('iframe');
+  Object.assign(iframe.style, { position:'absolute', inset:'0', width:'100%', height:'100%', border:'0', background:'#000' });
+  host.appendChild(iframe);
+  document.body.appendChild(host);
+
+  const onMsg = (e) => {
+    const msg = e.data || {};
+    if (!msg || !msg.__detail) return;
+    if (msg.t === 'back') closeOverlay();
+    if (msg.t === 'openMode') openModeDetailOverlay(msg.devId, msg.devNo, msg.modeId);
+  };
+  window.addEventListener('message', onMsg);
+
+  __overlay = { host, iframe, onMsg };
+  return __overlay;
+}
+function openOverlay(url, params={}) {
+  const ov = ensureOverlay();
+  const qs = new URLSearchParams(params); qs.set('_ts', Date.now());
+  ov.iframe.src = `${url}?${qs.toString()}`;
+  ov.host.style.display = 'block';
+}
+function closeOverlay() {
+  if (!__overlay) return;
+  __overlay.host.style.display = 'none';
+  try { __overlay.iframe.src = 'about:blank'; } catch {}
+}
+function openDeviceDetailOverlay(devId, devNo){
+  openOverlay('/modules/features/pages/details/device-detail.html', { devId, devNo });
+}
+function openVideoDetailOverlay(devId, devNo){
+  openOverlay('/modules/features/pages/details/video-detail.html', { devId, devNo, stream:'main' });
+}
+function openModeDetailOverlay(devId, devNo, modeId){
+  const mid = Number(modeId);
+  const url = mid===1 ? '/modules/features/pages/details/mode-tilt-detail.html'
+            : mid===2 ? '/modules/features/pages/details/mode-disp-tilt-detail.html'
+            : '/modules/features/pages/details/mode-audio-detail.html';
+  openOverlay(url, { devId, devNo, modeId: mid });
 }
 
 /* ---------------- 工具 ---------------- */
@@ -617,3 +671,24 @@ function debounce(fn, wait=300) { let t; return (...args)=>{ clearTimeout(t); t=
 function getFiltersFromTree(){ return tree.getFilterValues(); }
 function escapeHTML(str=''){return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmt(ts){ if(!ts) return ''; const d=new Date(ts); const p=n=>n<10?'0'+n:n; return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+
+/* ---------------- 树设备点击绑定（兼容多事件名） ---------------- */
+function bindTreeDeviceClick(treeEl){
+  const handler = async (e)=>{
+    const devId = e?.detail?.devId ?? e?.detail?.id ?? e?.devId ?? e?.id;
+    const devNo = e?.detail?.devNo ?? e?.detail?.no ?? e?.devNo ?? e?.no;
+    const lastLocation = e?.detail?.lastLocation;
+    if (!devId) { console.warn('[Site][tree] device click missing devId', e); return; }
+    try{
+      const data=await apiDeviceInfo(devId);
+      console.debug('[Site][tree] openDevice with api data', devId);
+      mapView.openDevice({ devInfo: (data && data.devInfo) ? data.devInfo : { id: devId, no: devNo, lastLocation }, followCenterWhenNoLocation:true });
+    }catch(err){
+      console.warn('[Site][tree] apiDeviceInfo failed, fallback openDevice. id=', devId, err);
+      mapView.openDevice({ devInfo: { id: devId, no: devNo, lastLocation }, followCenterWhenNoLocation:true });
+    }
+  };
+  ['deviceclick','deviceClick','devclick','dev:click'].forEach(evt=>{
+    try { treeEl.addEventListener(evt, handler); } catch {}
+  });
+}

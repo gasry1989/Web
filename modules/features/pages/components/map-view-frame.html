@@ -28,11 +28,9 @@
 
       var map=null,markers=[],infoWindow=null, geocoder=null, mounted=false;
       var infoFrame=null, infoWindowOpen=false;
-
       var currentDevInfo=null;
-      var currentShownDevId=null;        // 正在信息窗里显示的设备
-      var lastInfoPos=null;              // {lng,lat} 数值坐标，作为“默认位置”
-      var openedDevIds = Object.create(null); // 仅用于日志与可能的扩展
+      var lastInfoPos=null; // { lng, lat } 缓存为数值
+      var openedDevIds = Object.create(null);
 
       function ensureAMap(cb){
         if(!AMAP_KEY){ post({t:"error",message:"缺少高德 Key（AMAP_KEY）"}); return; }
@@ -61,7 +59,6 @@
           map.on && map.on("complete", function(){ post({t:"ready"}); });
 
           var clearSel=function(){ try{ var s=window.getSelection && window.getSelection(); if(s&&s.removeAllRanges) s.removeAllRanges(); }catch(e){} };
-          // 我们能控制的监听尽量 passive，SDK 内部的警告可忽略
           map.on && map.on("click", clearSel, { passive:true });
           map.on && map.on("mousemove", clearSel, { passive:true });
           map.on && map.on("dragstart", clearSel, { passive:true });
@@ -106,7 +103,12 @@
       }
 
       function ensureInfoContent(){
-        if (!infoWindow) infoWindow = new AMap.InfoWindow({ isCustom:true, offset:new AMap.Pixel(0,-20), closeWhenClickMap:false, autoMove: false });
+        if (!infoWindow) infoWindow = new AMap.InfoWindow({
+          isCustom:true,
+          offset:new AMap.Pixel(0,-20),
+          closeWhenClickMap:false,
+          autoMove:false  // 关键：关闭自动平移，避免“位置被带走”
+        });
         if (!infoFrame) {
           var ifr=document.createElement('iframe');
           ifr.className='ov-iframe';
@@ -128,7 +130,6 @@
         }catch(e){}
       }
 
-      // 固定且稳定的默认坐标：首次使用时从当前地图中心缓存为数值
       function defaultPosArray(){
         if (!lastInfoPos) {
           try{
@@ -141,48 +142,32 @@
         return [ lastInfoPos.lng, lastInfoPos.lat ];
       }
 
-      // 打开/更新信息窗（修正版：切换到“无经纬度”设备不移动）
+      // 打开/更新信息窗
       function openDevice(devInfo, followCenterWhenNoLocation){
         if(!mounted) return;
         currentDevInfo = devInfo || {};
-        var devId = currentDevInfo && currentDevInfo.id!=null ? String(currentDevInfo.id) : null;
         var hasLL = !!(currentDevInfo && currentDevInfo.lastLocation && currentDevInfo.lastLocation.lng!=null && currentDevInfo.lastLocation.lat!=null);
         var ll = hasLL ? [ Number(currentDevInfo.lastLocation.lng), Number(currentDevInfo.lastLocation.lat) ] : null;
 
         ensureInfoContent();
 
-        var action = '';      // 'open-default' | 'open-ll' | 'move-ll' | 'stay'
-        var target = null;    // [lng,lat] 或 null
-
         if (!infoWindowOpen) {
-          if (hasLL) { action='open-ll'; target=ll; }
-          else { action='open-default'; target=defaultPosArray(); }
-          try { infoWindow.open(map, target); infoWindowOpen = true; } catch(e){}
+          // 初次：有经纬度 -> 在经纬度打开；无经纬度 -> 在默认数值坐标打开
+          var openAt = ll || defaultPosArray();
+          try { infoWindow.open(map, openAt); infoWindowOpen = true; } catch(e){}
         } else {
-          // 已有信息窗：仅在“有经纬度”时才移动，切到“无经纬度”保持当前位置
-          if (hasLL) {
-            action = (currentShownDevId === devId) ? 'move-ll' : 'move-ll';
-            target = ll;
-            try { infoWindow.setPosition(target); } catch(e){}
-          } else {
-            action = 'stay';
-            // 可见性保险：若意外被关闭或未绘制，强制在默认处打开
-            try {
-              var cur = infoWindow.getPosition && infoWindow.getPosition();
-              if (!cur) { infoWindow.open(map, defaultPosArray()); infoWindowOpen = true; action = 'open-default'; target = defaultPosArray(); }
-            } catch(e){}
-          }
+          // 已打开：有经纬度就移动；无经纬度不移动（autoMove=false，不会自动平移）
+          if (ll) { try { infoWindow.setPosition(ll); } catch(e){} }
         }
 
-        // 以实际显示位置回写 lastInfoPos（稳定为数值）
+        // 回写 lastInfoPos（以实际显示位置为准）
         try{
           var p = infoWindow.getPosition && infoWindow.getPosition();
           if (p) lastInfoPos = { lng: Number(p.lng), lat: Number(p.lat) };
         }catch(e){}
 
-        currentShownDevId = devId;
         sendDataToChild();
-        log('update infoWindow', { devId:devId, shown:currentShownDevId, opened:infoWindowOpen, hasLL:hasLL, action:action, pos:target, lastInfoPos:lastInfoPos });
+        log("update infoWindow", {devId: String(currentDevInfo && currentDevInfo.id), opened:infoWindowOpen, hasLL:hasLL, pos: ll, lastInfoPos:lastInfoPos });
       }
 
       function setCenter(lng,lat){ try{ map&&map.setCenter([lng,lat]); }catch(e){} }
@@ -190,7 +175,6 @@
 
       window.addEventListener('message', function(e){
         var msg=e.data||{};
-        // 子 iframe -> 父
         if (msg && msg.__iv && e.source === (infoFrame && infoFrame.contentWindow)) {
           switch(msg.t){
             case 'ready':

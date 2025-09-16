@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>音频模式详情</title>
+  <style>
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    *{box-sizing:border-box;}
+    .wrap{position:absolute; inset:48px 0 0 0; color:#e6f0ff;}
+    .chart{ position:absolute; inset:48px 0 100px 0; }
+    canvas{ width:100%; height:100%; display:block; background:#000; }
+    .bottomBar{ position:absolute; left:0; right:0; bottom:0; height:100px; background:#0b0f14; display:flex; align-items:center; justify-content:space-around; border-top:1px solid #1f2a3a; overflow-x:auto; }
+    .slot{ width:120px; text-align:center; color:#fff; flex:0 0 auto; }
+    .wifi::before{ content:''; display:block; margin:0 auto 6px; width:18px; height:14px; background:
+      radial-gradient(circle at 4px 14px,#fff 2px,transparent 3px),
+      radial-gradient(circle at 9px 9px, #fff 2px, transparent 3px),
+      radial-gradient(circle at 14px 4px,#fff 2px,transparent 3px); }
+    .batt{ position:relative; width:36px; height:14px; border:2px solid #9f9; border-radius:2px; display:inline-block; vertical-align:middle;}
+    .batt::after{ content:''; position:absolute; right:-5px; top:3px; width:3px; height:8px; background:#9f9; }
+    .batt .fill{ position:absolute; left:0; top:0; bottom:0; width:70%; background:#27e65e;}
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { mountTopbar, detailBridge } from './common/detail-common.js';
+    const qs = new URLSearchParams(location.search);
+    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
+    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNo || devId;
+    const bridge = detailBridge(); bridge.ready({ page:'mode-audio', devId, devNo });
+
+    const wrap = document.createElement('div'); wrap.className='wrap';
+    wrap.innerHTML = `<div class="chart"><canvas id="cv"></canvas></div><div class="bottomBar" id="btm"></div>`;
+    document.body.appendChild(wrap);
+
+    const cv = document.getElementById('cv'); const ctx = cv.getContext('2d');
+    function draw(vals=[100,0,100,0,60,0,100,0]){
+      const dpr = devicePixelRatio || 1;
+      const w = cv.clientWidth, h = cv.clientHeight;
+      cv.width = Math.floor(w * dpr); cv.height = Math.floor(h * dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+      ctx.fillStyle = '#111'; ctx.fillRect(0,0,w,h);
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+      for(let i=0;i<5;i++){ const y = h - (i*(h/5)); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+      const n = vals.length; const spacing = w/(n*2);
+      vals.forEach((v,i)=>{
+        const x = spacing + i*2*spacing; const bw = spacing*1.4; const bh = (v/100)* (h*0.9);
+        ctx.fillStyle='#fff'; ctx.fillRect(x - bw/2, h - bh, bw, bh);
+        ctx.font='18px system-ui'; ctx.textAlign='center'; ctx.fillText(String(v), x, Math.max(20, h - bh - 6));
+      });
+    }
+    new ResizeObserver(()=>draw()).observe(cv); setTimeout(()=>draw(),0);
+
+    const btm = document.getElementById('btm');
+    btm.innerHTML = [1,2,5,7,8].map(n=>`
+      <div class="slot">
+        <div class="wifi"></div>
+        <div class="batt"><div class="fill" style="width:${80-Math.random()*40}%"></div></div>
+        <div style="margin-top:6px;">${n}</div>
+      </div>
+    `).join('');
+
+    // WS：打开并请求模式数据
+    const ch = await bridge.wsOpen({ kind:'mode', devId, modeId: 3 });
+    bridge.wsSend(ch, { cmd:'modeData', to:{type:1,id:devId}, data:{ modeId: 300 } });
+    bridge.onWsMessage((m)=>{ if (m.cmd==='modeDataResponse' && m.code===0) { /* 渲染音频值 */ } });
+
+    ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
+  </script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>倾角模式详情</title>
+  <style>
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    *{box-sizing:border-box;}
+    .wrap{ position:absolute; inset:48px 0 0 0; overflow:auto; }
+    .hdr, .row{ display:grid; grid-template-columns:120px 1fr 120px 120px 120px 120px 120px 200px; align-items:center; padding:10px 16px; }
+    .hdr{ font-weight:700; border-bottom:1px solid #1f2a3a; }
+    .row{ border-bottom:1px solid #1f2a3a; }
+    .cell{ display:flex; align-items:center; gap:10px; }
+    .wifi::before{ content:''; width:18px; height:14px; background:
+      radial-gradient(circle at 4px 14px,#fff 2px,transparent 3px),
+      radial-gradient(circle at 9px 9px, #fff 2px, transparent 3px),
+      radial-gradient(circle at 14px 4px,#fff 2px,transparent 3px); display:inline-block; }
+    .lamp{ width:16px;height:16px;background:#2dbb69;border-radius:3px; border:1px solid #0b3; }
+    .switch{ position:relative; width:44px; height:24px; background:#e9eef5; border-radius:12px; box-shadow:inset 0 2px 4px rgba(0,0,0,.35); cursor:pointer;}
+    .switch::after{ content:''; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:.2s; }
+    .switch.on{ background:#2ea866; } .switch.on::after{ left:23px; }
+    .siren{ width:22px; height:22px; border-radius:50%; border:2px solid #fff; display:inline-flex; align-items:center; justify-content:center;}
+    .tri{ width:0;height:0;border-left:10px solid #8aa; border-top:8px solid transparent; border-bottom:8px solid transparent; }
+    .batt{ position:relative; width:36px; height:14px; border:2px solid #9f9; border-radius:2px;}
+    .batt::after{ content:''; position:absolute; right:-5px; top:3px; width:3px; height:8px; background:#9f9; }
+    .batt .fill{ position:absolute; left:0; top:0; bottom:0; width:70%; background:#27e65e;}
+    .val{ text-align:right; padding-right:6px; font-weight:700; color:#aefcae; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { mountTopbar, detailBridge } from './common/detail-common.js';
+    const qs = new URLSearchParams(location.search);
+    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
+    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNo || devId;
+    const bridge = detailBridge(); bridge.ready({ page:'mode-tilt', devId, devNo });
+
+    const wrap = document.createElement('div'); wrap.className='wrap';
+    wrap.innerHTML = `
+      <div class="hdr">
+        <div class="cell">编号</div>
+        <div class="cell">状态</div>
+        <div class="cell">预警状态</div>
+        <div class="cell">报警阈值</div>
+        <div class="cell">电量</div>
+        <div class="cell">移动值</div>
+        <div class="cell">当前值</div>
+        <div class="cell"></div>
+      </div>
+      <div id="list"></div>
+    `;
+    document.body.appendChild(wrap);
+
+    const list = wrap.querySelector('#list');
+
+    function render(items){
+      const html = (items||[]).slice(0,12).map((r,idx)=>`
+        <div class="row">
+          <div class="cell">${r.name||('倾角'+(idx+1)+'#')}</div>
+          <div class="cell"><span class="wifi"></span><span class="lamp"></span></div>
+          <div class="cell"><div class="switch ${r.warn?'on':''}" id="btnWarnToggle-${idx}"></div></div>
+          <div class="cell"><span class="siren" id="btnSiren-${idx}">⎍</span></div>
+          <div class="cell"><div class="tri" id="btnThreshDec-${idx}"></div><div class="val" id="lblThresh-${idx}">0.3°</div></div>
+          <div class="cell"><div class="batt"><div class="fill" style="width:${Math.round((r.batt||0)*1)}%"></div></div></div>
+          <div class="cell val">${r.move||'0.00°'}</div>
+          <div class="cell val">${r.cur||'0.54°'}</div>
+        </div>
+      `).join('');
+      list.innerHTML = html;
+    }
+    render([{},{},{}]); // 初始空 UI
+
+    // 打开 WS 通道并发起一次模式数据请求
+    const ch = await bridge.wsOpen({ kind:'mode', devId, modeId: 1 });
+    bridge.wsSend(ch, {
+      cmd: 'modeData',
+      to: { type: 1, id: devId },
+      data: { modeId: 100 } // 示例：真实按你协议填写
+    });
+    bridge.onWsMessage((m)=>{
+      if (m.cmd === 'modeDataResponse' && m.code === 0) {
+        // 期望 m.data.items
+        render(m.data.items || []);
+      }
+      // 也可处理服务端推送
+    });
+
+    // 顶栏
+    ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
+  </script>
+</body>
+</html>

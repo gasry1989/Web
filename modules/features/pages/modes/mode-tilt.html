@@ -4,61 +4,45 @@
     <style>
       :host{
         all:initial; contain:content; display:block; width:100%; height:100%; align-self:stretch;
-        /* 由 JS 动态写入，仅用于等比缩放视觉元素（不再直接控制行高） */
-        --fs: 10px;           /* 基础字体 */
-        --icon: 12px;         /* 图标边长 */
-        --batt-w: 28px;       /* 电量条宽 */
-        --batt-h: 8px;        /* 电量条高 */
-        --cap-w: 3px;         /* 电量帽宽 */
-        --cap-h: 4px;         /* 电量帽高 */
-        --hgap: 8px;          /* 行内列间距（等距挤压） */
-        --divider: rgba(255,255,255,.16); /* 分隔线颜色 */
+        --fs: 10px;
+        --icon: 12px;
+        --batt-w: 28px;
+        --batt-h: 8px;
+        --cap-w: 3px;
+        --cap-h: 4px;
+        --hgap: 8px;
+        --divider: rgba(255,255,255,.16);
       }
       *,*::before,*::after{box-sizing:border-box}
 
-      /* 上下不留内边距；Grid 负责行高平均分配与分隔线（row-gap） */
-      .wrap{position:relative;height:100%;padding:0 2px 0 2px;background:#000;color:#fff;font-size:var(--fs)}
+      .wrap{position:relative;height:100%;padding:0 2px;background:#000;color:#fff;font-size:var(--fs)}
       #list{
         height:100%;
         display:grid;
-        grid-auto-flow:row;
-        grid-auto-rows:1fr;     /* 任意行数平均分配高度 */
-        row-gap:1px;            /* 分隔线=1px */
-        background:var(--divider); /* gap 的颜色即分隔线颜色 */
+        grid-template-rows: repeat(12, minmax(0, 1fr));
+        background:#000; /* 纯黑 */
         overflow:hidden;
       }
 
-      /* 每一行内部改为列网格，使用 column-gap 实现等间距挤压 */
       .row{
         background:#000;
         display:grid;
         grid-template-columns: 1fr var(--icon) var(--icon) minmax(52px, max-content) var(--batt-w);
         align-items:center;
         column-gap:var(--hgap);
-        /* 不再设置 height，让 Grid track 决定行高 */
       }
+      .row + .row{ border-top:1px solid var(--divider); }
 
-      .name{
-        white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff; opacity:.9;
-      }
+      .name{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff; opacity:.9; }
       .icon{width:var(--icon);height:var(--icon);display:inline-block}
       .icon svg{width:100%;height:100%}
-      .icon.bulb{filter: drop-shadow(0 0 0.8px #00ff6a)}
+      .icon.bulb{filter: drop-shadow(0 0 .8px #00ff6a)}
       .icon.siren{opacity:.9}
 
-      .deg{
-        min-width:52px; text-align:left; color:#fff;
-        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-      }
+      .deg{ min-width:52px; text-align:left; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
-      .batt{
-        position:relative;width:var(--batt-w);height:var(--batt-h);
-        border:1px solid #fff;border-radius:2px;overflow:hidden;
-      }
-      .batt::after{
-        content:"";position:absolute;right:calc(-1 * var(--cap-w));top:calc((var(--batt-h) - var(--cap-h))/2);
-        width:var(--cap-w);height:var(--cap-h);background:#fff;border-radius:1px
-      }
+      .batt{ position:relative;width:var(--batt-w);height:var(--batt-h); border:1px solid #fff;border-radius:2px;overflow:hidden; }
+      .batt::after{ content:"";position:absolute;right:calc(-1 * var(--cap-w));top:calc((var(--batt-h) - var(--cap-h))/2); width:var(--cap-w);height:var(--cap-h);background:#fff;border-radius:1px }
       .fill{position:absolute;left:0;top:0;bottom:0;width:100%;background:#2eff67;transform-origin:0 50%;transform:scaleX(0)}
       .muted{opacity:.35}
 
