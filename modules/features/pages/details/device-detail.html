@@ -256,73 +256,79 @@
     function hide(el, flag){ if (!el) return; el.classList.toggle('hide', !!flag); }
 
     async function loadDeviceInfoAndLayout(){
-      if (!devId) return;
-      try{
-        const resp = await apiDeviceInfo(Number(devId));
-        const d = (resp && resp.devInfo) ? resp.devInfo : {};
+    if (!devId) return;
+    try{
+      const resp = await apiDeviceInfo(Number(devId));
+      const d = (resp && resp.devInfo) ? resp.devInfo : {};
 
-        // 右侧信息
-        document.getElementById('devIdLbl').textContent   = d.id ?? devId ?? '--';
-        document.getElementById('devNameLbl').textContent = d.no || d.name || '--';
-        document.getElementById('devTypeLbl').textContent = d.typeName || '--';
-        let modeNames = '--';
-        if (Array.isArray(d.modeList) && d.modeList.length) {
-          modeNames = d.modeList.map(m=>m.name||'').filter(Boolean).join('，') || '--';
-        }
-        document.getElementById('devModesLbl').textContent = modeNames;
-        document.getElementById('ownerIdLbl').textContent  = (d.parentUserId ?? d.ownerUserId ?? '--');
-        document.getElementById('ownerAccLbl').textContent = (d.parentUserAccount ?? d.ownerUserAccount ?? '无');
+      // 右侧信息
+      document.getElementById('devIdLbl').textContent   = d.id ?? devId ?? '--';
+      document.getElementById('devNameLbl').textContent = d.no || d.name || '--';
+      document.getElementById('devTypeLbl').textContent = d.typeName || '--';
 
-        // 视频能力
-        const screenCount = Number(d?.hardwareInfo?.screenCount ?? 0);
-        const cameraCount = Number(d?.hardwareInfo?.cameraCount ?? 0);
-
-        const hasScreen = screenCount > 0;
-        const hasMain = cameraCount > 0;
-        const hasSub  = cameraCount > 0;
-
-        if (hasScreen) mountPreview('cellScreen', STREAMS.screen);
-        hide(document.getElementById('secScreen'), !hasScreen);
-        setCols(document.getElementById('rowScreen'), hasScreen ? 1 : 0);
-
-        const mediaCards = [];
-        if (hasMain) { mountPreview('cellMain', STREAMS.main); mediaCards.push(1); } else hide(document.getElementById('cellMain'), true);
-        if (hasSub)  { mountPreview('cellSub',  STREAMS.sub);  mediaCards.push(1); } else hide(document.getElementById('cellSub'), true);
-        hide(document.getElementById('secMedia'), mediaCards.length === 0);
-        setCols(document.getElementById('rowMedia'), mediaCards.length);
-
-        // 模式支持（汉字匹配；都匹配不到时保留全部）
-        let supportTilt = true, supportDispTilt = true, supportAudio = true;
-        if (Array.isArray(d.modeList) && d.modeList.length) {
-          const names = d.modeList.map(m=>String(m.name||''));
-          supportTilt     = names.some(n=>/倾角/.test(n));
-          supportDispTilt = names.some(n=>/位移|倾角/.test(n));
-          supportAudio    = names.some(n=>/音频/.test(n));
-          if (!supportTilt && !supportDispTilt && !supportAudio) {
-            supportTilt = supportDispTilt = supportAudio = true;
-          }
-        }
-        hide(document.getElementById('cellModeTilt'), !supportTilt);
-        hide(document.getElementById('cellModeDispTilt'), !supportDispTilt);
-        hide(document.getElementById('cellModeAudio'), !supportAudio);
-
-        const modeCount = (supportTilt?1:0) + (supportDispTilt?1:0) + (supportAudio?1:0);
-        setCols(document.getElementById('rowModes'), Math.max(1, modeCount));
-        if (modeCount === 0) {
-          const row = document.getElementById('rowModes');
-          const placeholder = document.createElement('div');
-          placeholder.className = 'card mode';
-          placeholder.innerHTML = '<div style="color:#8aa;display:flex;align-items:center;justify-content:center;width:100%;height:100%;">该设备无可用模式</div>';
-          row.appendChild(placeholder);
-          setCols(row, 1);
-        }
-      } catch (e) {
-        console.warn('[device-detail] apiDeviceInfo failed; will still show defaults', e);
-        mountPreview('cellScreen', STREAMS.screen);
-        mountPreview('cellMain', STREAMS.main);
-        mountPreview('cellSub',  STREAMS.sub);
+      // 修复点：严格使用 modeList[].modeName，英文逗号拼接
+      let modeNames = '--';
+      if (Array.isArray(d.modeList) && d.modeList.length) {
+        modeNames = d.modeList
+          .map(m => (m && (m.modeName ?? m.name)) || '')
+          .filter(Boolean)
+          .join(',');
       }
+      document.getElementById('devModesLbl').textContent = modeNames;
+
+      document.getElementById('ownerIdLbl').textContent  = (d.parentUserId ?? d.ownerUserId ?? '--');
+      document.getElementById('ownerAccLbl').textContent = (d.parentUserAccount ?? d.ownerUserAccount ?? '无');
+
+      // 视频能力
+      const screenCount = Number(d?.hardwareInfo?.screenCount ?? 0);
+      const cameraCount = Number(d?.hardwareInfo?.cameraCount ?? 0);
+
+      const hasScreen = screenCount > 0;
+      const hasMain = cameraCount > 0;
+      const hasSub  = cameraCount > 0;
+
+      if (hasScreen) mountPreview('cellScreen', STREAMS.screen);
+      hide(document.getElementById('secScreen'), !hasScreen);
+      setCols(document.getElementById('rowScreen'), hasScreen ? 1 : 0);
+
+      const mediaCards = [];
+      if (hasMain) { mountPreview('cellMain', STREAMS.main); mediaCards.push(1); } else hide(document.getElementById('cellMain'), true);
+      if (hasSub)  { mountPreview('cellSub',  STREAMS.sub);  mediaCards.push(1); } else hide(document.getElementById('cellSub'), true);
+      hide(document.getElementById('secMedia'), mediaCards.length === 0);
+      setCols(document.getElementById('rowMedia'), mediaCards.length);
+
+      // 模式支持（沿用原逻辑）
+      let supportTilt = true, supportDispTilt = true, supportAudio = true;
+      if (Array.isArray(d.modeList) && d.modeList.length) {
+        const names = d.modeList.map(m=>String(m.name||''));
+        supportTilt     = names.some(n=>/倾角/.test(n));
+        supportDispTilt = names.some(n=>/位移|倾角/.test(n));
+        supportAudio    = names.some(n=>/音频/.test(n));
+        if (!supportTilt && !supportDispTilt && !supportAudio) {
+          supportTilt = supportDispTilt = supportAudio = true;
+        }
+      }
+      hide(document.getElementById('cellModeTilt'), !supportTilt);
+      hide(document.getElementById('cellModeDispTilt'), !supportDispTilt);
+      hide(document.getElementById('cellModeAudio'), !supportAudio);
+
+      const modeCount = (supportTilt?1:0) + (supportDispTilt?1:0) + (supportAudio?1:0);
+      setCols(document.getElementById('rowModes'), Math.max(1, modeCount));
+      if (modeCount === 0) {
+        const row = document.getElementById('rowModes');
+        const placeholder = document.createElement('div');
+        placeholder.className = 'card mode';
+        placeholder.innerHTML = '<div style="color:#8aa;display:flex;align-items:center;justify-content:center;width:100%;height:100%;">该设备无可用模式</div>';
+        row.appendChild(placeholder);
+        setCols(row, 1);
+      }
+    } catch (e) {
+      console.warn('[device-detail] apiDeviceInfo failed; will still show defaults', e);
+      mountPreview('cellScreen', STREAMS.screen);
+      mountPreview('cellMain', STREAMS.main);
+      mountPreview('cellSub',  STREAMS.sub);
     }
+  }
     await loadDeviceInfoAndLayout();
 
     /* ------------------- 点击：跳详情/模式 ------------------- */
