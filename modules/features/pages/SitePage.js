@@ -16,6 +16,7 @@ import { createModeAudio } from './modes/ModeAudio.js';
 import { createMapView } from './components/MapView.js';
 import { ENV } from '/config/env.js';
 import { siteState } from '@state/siteState.js';
+import { wsHub } from '@core/hub.js';
 
 import {
   apiDevTypes, apiDevModes, apiGroupedDevices, apiUngroupedDevices,
@@ -694,34 +695,101 @@ function enableGridClickOpen(grid) {
 let __overlay = null;
 function ensureOverlay() {
   if (__overlay && document.body.contains(__overlay.host)) return __overlay;
+
   const host = document.createElement('div');
   Object.assign(host.style, { position:'fixed', inset:'0', background:'#000', zIndex:'2147483645', display:'none' });
+
   const iframe = document.createElement('iframe');
   Object.assign(iframe.style, { position:'absolute', inset:'0', width:'100%', height:'100%', border:'0', background:'#000' });
   host.appendChild(iframe);
   document.body.appendChild(host);
 
+  // 新增：为每个“子页通道”维护订阅（ch -> unbind），以及 key（便于调试）
+  const chUnsub = new Map(); // ch -> () => void
+  const chKey = new Map();   // ch -> { kind, devId, modeId }
+
   const onMsg = function (e) {
     const msg = e.data || {};
     if (!msg || !msg.__detail) return;
 
-    // 子页 ready -> 下发 init（把 openOverlay 时的参数带回去，确保有 devId/devNo/modeId/stream）
-    if (msg.t === 'ready') {
-      try {
-        const payload = Object.assign({ t:'init' }, (__overlay.initParams || {}));
-        iframe.contentWindow?.postMessage(Object.assign({ __detail:true }, payload), '*');
-      } catch (err) {
-        console.warn('[Overlay] send init failed', err);
+    switch (msg.t) {
+      case 'ready': {
+        // 子页 ready -> 下发 init
+        try {
+          const payload = Object.assign({ t:'init' }, (__overlay.initParams || {}));
+          iframe.contentWindow?.postMessage(Object.assign({ __detail:true }, payload), '*');
+        } catch (err) {
+          console.warn('[Overlay] send init failed', err);
+        }
+        return;
       }
-      return;
-    }
 
-    if (msg.t === 'back') closeOverlay();
-    if (msg.t === 'openMode') openModeDetailOverlay(msg.devId, msg.devNo, msg.modeId);
+      case 'back':
+        closeOverlay();
+        return;
+
+      case 'openMode':
+        openModeDetailOverlay(msg.devId, msg.devNo, msg.modeId);
+        return;
+
+      // ========= detailBridge 的 WS 桥接：BEGIN =========
+      case 'ws:open': {
+        // 生成一个通道 id（仅用于在父页区分同一个 iframe 内的不同通道）
+        const ch = Date.now() + Math.floor(Math.random() * 1000);
+        chKey.set(ch, { kind: msg.kind, devId: msg.devId, modeId: msg.modeId });
+
+        // 建立匹配订阅：按 to.id / modeId 分发回这个 iframe
+        const filter = {};
+        if (msg.devId != null) filter['to.id'] = String(msg.devId);
+        if (msg.modeId != null) filter['modeId'] = String(msg.modeId);
+
+        const unbind = wsHub.onMatch(filter, (m) => {
+          try {
+            iframe.contentWindow?.postMessage({ __detail:true, t:'ws:message', ch, data: m }, '*');
+          } catch (err) {
+            console.warn('[Overlay] forward ws message failed', err);
+          }
+        });
+        chUnsub.set(ch, unbind);
+
+        // 回 OK + 通道 id
+        try {
+          iframe.contentWindow?.postMessage({ __detail:true, t:'ws:open:ok', reqId: msg.reqId, ch }, '*');
+        } catch (err) {
+          console.warn('[Overlay] ws:open:ok postMessage failed', err);
+        }
+        return;
+      }
+
+      case 'ws:send': {
+        // 子页请求发送（父页集中接入 wsHub）
+        try {
+          wsHub.send(msg.data);
+        } catch (err) {
+          console.warn('[Overlay] ws:send failed', err);
+        }
+        return;
+      }
+
+      case 'ws:close': {
+        // 关闭该通道的订阅
+        const ch = msg.ch;
+        const un = chUnsub.get(ch);
+        if (un) { try { un(); } catch {} }
+        chUnsub.delete(ch);
+        chKey.delete(ch);
+        try {
+          iframe.contentWindow?.postMessage({ __detail:true, t:'ws:closed', ch }, '*');
+        } catch (err) {}
+        return;
+      }
+      // ========= detailBridge 的 WS 桥接：END =========
+    }
   };
+
   window.addEventListener('message', onMsg);
 
-  __overlay = { host: host, iframe: iframe, onMsg: onMsg, initParams: null };
+  __overlay = { host, iframe, onMsg, initParams: null, chUnsub, chKey };
   return __overlay;
 }
 function openOverlay(url, params){
@@ -734,6 +802,18 @@ function openOverlay(url, params){
 }
 function closeOverlay() {
   if (!__overlay) return;
+
+  // 先清理 WS 订阅，避免内存泄漏
+  try {
+    if (__overlay.chUnsub) {
+      for (const un of __overlay.chUnsub.values()) { try { un(); } catch {} }
+      __overlay.chUnsub.clear?.();
+    }
+    __overlay.chKey && __overlay.chKey.clear?.();
+  } catch (e) {
+    console.warn('[Overlay] cleanup subs error', e);
+  }
+
   __overlay.host.style.display = 'none';
   try { __overlay.iframe.src = 'about:blank'; } catch (e) {}
 }

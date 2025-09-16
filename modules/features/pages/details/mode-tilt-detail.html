@@ -4,37 +4,65 @@
   <meta charset="utf-8"/>
   <title>倾角模式详情</title>
   <style>
-    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;overflow:hidden;}
     *{box-sizing:border-box;}
-    .wrap{ position:absolute; inset:48px 0 0 0; overflow:auto; }
-    .hdr, .row{ display:grid; grid-template-columns:120px 1fr 120px 120px 120px 120px 120px 200px; align-items:center; padding:10px 16px; }
-    .hdr{ font-weight:700; border-bottom:1px solid #1f2a3a; }
-    .row{ border-bottom:1px solid #1f2a3a; }
-    .cell{ display:flex; align-items:center; gap:10px; }
-    .wifi::before{ content:''; width:18px; height:14px; background:
-      radial-gradient(circle at 4px 14px,#fff 2px,transparent 3px),
-      radial-gradient(circle at 9px 9px, #fff 2px, transparent 3px),
-      radial-gradient(circle at 14px 4px,#fff 2px,transparent 3px); display:inline-block; }
-    .lamp{ width:16px;height:16px;background:#2dbb69;border-radius:3px; border:1px solid #0b3; }
-    .switch{ position:relative; width:44px; height:24px; background:#e9eef5; border-radius:12px; box-shadow:inset 0 2px 4px rgba(0,0,0,.35); cursor:pointer;}
-    .switch::after{ content:''; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:.2s; }
-    .switch.on{ background:#2ea866; } .switch.on::after{ left:23px; }
-    .siren{ width:22px; height:22px; border-radius:50%; border:2px solid #fff; display:inline-flex; align-items:center; justify-content:center;}
-    .tri{ width:0;height:0;border-left:10px solid #8aa; border-top:8px solid transparent; border-bottom:8px solid transparent; }
-    .batt{ position:relative; width:36px; height:14px; border:2px solid #9f9; border-radius:2px;}
-    .batt::after{ content:''; position:absolute; right:-5px; top:3px; width:3px; height:8px; background:#9f9; }
-    .batt .fill{ position:absolute; left:0; top:0; bottom:0; width:70%; background:#27e65e;}
-    .val{ text-align:right; padding-right:6px; font-weight:700; color:#aefcae; }
+    .wrap{position:absolute;inset:48px 0 0 0;overflow-y:auto;overflow-x:hidden;background:#000;}
+    .hdr,.row{
+      display:grid;
+      grid-template-columns: 160px 220px 180px 260px 140px 140px minmax(200px,1fr);
+      align-items:center; padding:12px 16px; column-gap:12px;
+    }
+    .hdr{font-weight:700;border-bottom:1px solid #2a3642;background:#0a0f14;position:sticky;top:0;z-index:2;}
+    .row{border-bottom:1px solid #1f2a3a;}
+    .cell{display:flex;align-items:center;gap:14px;min-width:0;}
+    .name{font-size:16px;font-weight:600;}
+    .wifi{width:26px;height:18px;position:relative;cursor:pointer;}
+    .wifi::before,.wifi::after{content:'';position:absolute;left:0;right:0;margin:auto;border:2px solid #fff;border-top:none;border-left:none;border-bottom-right-radius:20px;transform:rotate(45deg);}
+    .wifi::before{width:20px;height:20px;top:-2px;}
+    .wifi::after{width:14px;height:14px;top:3px;}
+    .lamp{width:20px;height:20px;border-radius:5px;border:1px solid #0b3;background:#2dbb69;cursor:pointer;}
+    .lamp.off{background:#233240;border-color:#445560;}
+    .switch{position:relative;width:56px;height:28px;background:#e9eef5;border-radius:14px;box-shadow:inset 0 2px 4px rgba(0,0,0,.35);cursor:pointer;flex:0 0 auto;}
+    .switch::after{content:'';position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:.2s;}
+    .switch.on{background:#2ea866;}
+    .switch.on::after{left:31px;}
+    .alarm{width:28px;height:28px;border-radius:50%;border:2px solid #e6f0ff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 auto;}
+    .alarm::after{content:'';width:14px;height:14px;border-radius:50%;border:2px solid #e6f0ff;}
+    .caret{width:0;height:0;border-top:9px solid transparent;border-bottom:9px solid transparent;cursor:pointer;}
+    .caret.left{border-right:12px solid #cfe3ff;}
+    .caret.right{border-left:12px solid #cfe3ff;}
+    .thresh{min-width:70px;text-align:center;font-weight:700;}
+    .batt{position:relative;width:52px;height:18px;border:2px solid #9f9;border-radius:3px;flex:0 0 auto;}
+    .batt::after{content:'';position:absolute;right:-6px;top:4px;width:4px;height:8px;background:#9f9;border-radius:1px;}
+    .batt .fill{position:absolute;left:0;top:0;bottom:0;width:70%;background:#27e65e;}
+    .val{font-weight:700;color:#aefcae;white-space:nowrap;}
+    .xyz{display:flex;flex-direction:column;gap:3px;line-height:1.2;font-weight:700;color:#aefcae;white-space:nowrap;}
+    .row .cell .click:hover{filter:brightness(1.15);}
+    .click{cursor:pointer;}
   </style>
 </head>
 <body>
   <script type="module">
+    console.log('[tilt-detail] script start');
     import { mountTopbar, detailBridge } from './common/detail-common.js';
-    const qs = new URLSearchParams(location.search);
-    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
-    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNo || devId;
-    const bridge = detailBridge(); bridge.ready({ page:'mode-tilt', devId, devNo });
 
+    // 读取 devId/devNo，并通过 detailBridge 复用父页 WS
+    const qs = new URLSearchParams(location.search);
+    let devId = qs.get('devId')||''; const devNoQS = qs.get('devNo')||'';
+    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNoQS || devId || '设备';
+    const bridge = detailBridge(); bridge.ready({ page:'mode-tilt', devId, devNo: devNoQS });
+    console.log('[tilt-detail] initial devId from query =', devId);
+
+    if (!devId) {
+      try {
+        const init = await bridge.waitInit();
+        devId = String(init?.devId || devId || '');
+        if (init?.devNo && !devNoQS) ui.lblDevNo.textContent = init.devNo || devId;
+        console.log('[tilt-detail] devId resolved from parent init =', devId);
+      } catch (e) { console.warn('[tilt-detail] waitInit error:', e); }
+    }
+
+    // 布局
     const wrap = document.createElement('div'); wrap.className='wrap';
     wrap.innerHTML = `
       <div class="hdr">
@@ -45,47 +73,184 @@
         <div class="cell">电量</div>
         <div class="cell">移动值</div>
         <div class="cell">当前值</div>
-        <div class="cell"></div>
       </div>
       <div id="list"></div>
     `;
     document.body.appendChild(wrap);
-
     const list = wrap.querySelector('#list');
 
-    function render(items){
-      const html = (items||[]).slice(0,12).map((r,idx)=>`
-        <div class="row">
-          <div class="cell">${r.name||('倾角'+(idx+1)+'#')}</div>
-          <div class="cell"><span class="wifi"></span><span class="lamp"></span></div>
-          <div class="cell"><div class="switch ${r.warn?'on':''}" id="btnWarnToggle-${idx}"></div></div>
-          <div class="cell"><span class="siren" id="btnSiren-${idx}">⎍</span></div>
-          <div class="cell"><div class="tri" id="btnThreshDec-${idx}"></div><div class="val" id="lblThresh-${idx}">0.3°</div></div>
-          <div class="cell"><div class="batt"><div class="fill" style="width:${Math.round((r.batt||0)*1)}%"></div></div></div>
-          <div class="cell val">${r.move||'0.00°'}</div>
-          <div class="cell val">${r.cur||'0.54°'}</div>
+    // 非阻塞打开 WS 通道
+    let ch = null; const to = { type:1, id:devId };
+    console.log('[tilt-detail] try wsOpen with', { kind:'mode', devId, modeId:1 });
+    bridge.wsOpen({ kind:'mode', devId, modeId:1 })
+      .then(c => { ch = c; console.log('[tilt-detail] WS channel opened:', ch); })
+      .catch(err => console.warn('[tilt-detail] wsOpen error:', err));
+
+    function send(cmd,data){
+      const payload = { cmd, to, data };
+      if (!ch) { console.warn('[tilt-detail] WS not ready, skip send:', payload); return; }
+      console.log('[tilt-detail] WS send ->', payload);
+      bridge.wsSend(ch, payload);
+    }
+
+    // 工具：格式化
+    function clamp(v,min,max){ v=+v; return v<min?min:(v>max?max:v); }
+    function fmtDeg2(v){ return (+(v)).toFixed(2)+'°'; }
+    function fmtSigned2(v){
+      const s = (v>=0?'+':'-'); const abs = Math.abs(v); const txt = abs.toFixed(2);
+      const [i,f] = txt.split('.'); return s + (i.padStart(3,'0')) + '.' + (f||'00').slice(0,2) + '°';
+    }
+    function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+    // 动态数量（0~12）+ 随机类型
+    let rows = [];
+    function makeItem(i){
+      const isXYZ = Math.random() < 0.5; // 随机类型
+      return {
+        idx:i,
+        name:'倾角'+(i+1)+'#',
+        wifi:true,
+        lampOn: Math.random() > 0.3,
+        stateOn: Math.random() > 0.5,   // 状态开关
+        warnOn: Math.random() > 0.5,    // 预警状态开关
+        thresh: 0.3,
+        batt: Math.floor(40 + Math.random()*60),
+        move: 0.00,
+        type: isXYZ ? 'xyz' : 'deg',
+        curDeg: +(0.10 + Math.random()*0.90).toFixed(2),
+        x: +(Math.random()*20-10).toFixed(2),
+        y: +(Math.random()*20-10).toFixed(2),
+        z: +(Math.random()*30).toFixed(2)
+      };
+    }
+    function ensureRowsSize(n){
+      const cur = rows.length;
+      if (n>cur) {
+        for(let i=cur;i<n;i++) rows.push(makeItem(i));
+      } else if (n<cur) {
+        rows = rows.slice(0,n);
+      }
+      rows.forEach((r,i)=> r.idx=i); // 重新编号，保证事件索引可用
+      console.log('[tilt-detail] ensureRowsSize ->', n);
+    }
+
+    // 初始随机数量
+    ensureRowsSize(randInt(0,12));
+
+    // 渲染
+    function render(){
+      const html = rows.map(r=>`
+        <div class="row" data-idx="${r.idx}">
+          <div class="cell"><div class="name">${r.name}</div></div>
+          <div class="cell">
+            <div class="wifi click" data-act="wifi"></div>
+            <div class="lamp ${r.lampOn?'':'off'} click" data-act="lamp"></div>
+            <div class="switch ${r.stateOn?'on':''} click" data-act="state"></div>
+          </div>
+          <div class="cell">
+            <div class="switch ${r.warnOn?'on':''} click" data-act="warn"></div>
+          </div>
+          <div class="cell">
+            <div class="alarm click" data-act="alarm"></div>
+            <div class="caret left click" data-act="thresh-dec" title="-0.1°"></div>
+            <div class="thresh click" data-act="thresh">${r.thresh.toFixed(1)}°</div>
+            <div class="caret right click" data-act="thresh-inc" title="+0.1°"></div>
+          </div>
+          <div class="cell"><div class="batt"><div class="fill" style="width:${clamp(r.batt,0,100)}%"></div></div></div>
+          <div class="cell"><div class="val">${fmtDeg2(r.move)}</div></div>
+          <div class="cell">
+            ${r.type==='deg'
+              ? `<div class="val">${fmtDeg2(r.curDeg)}</div>`
+              : `<div class="xyz">
+                   <div>X:${fmtSigned2(r.x)}</div>
+                   <div>Y:${fmtSigned2(r.y)}</div>
+                   <div>Z:${fmtSigned2(r.z)}</div>
+                 </div>`}
+          </div>
         </div>
       `).join('');
       list.innerHTML = html;
+      console.log('[tilt-detail] render done. rows =', rows.length);
     }
-    render([{},{},{}]); // 初始空 UI
+    render();
 
-    // 打开 WS 通道并发起一次模式数据请求（确保复用）
-    const ch = await bridge.wsOpen({ kind:'mode', devId, modeId: 1 });
-    bridge.wsSend(ch, {
-      cmd: 'modeData',
-      to: { type: 1, id: devId },
-      data: { modeId: 100 } // 示例：真实按你协议填写
+    // 点击交互
+    list.addEventListener('click',(e)=>{
+      const row = e.target.closest('.row'); if(!row) return;
+      const idx = Number(row.getAttribute('data-idx'));
+      const it = rows.find(x=>x.idx===idx); if(!it) return;
+      const act = e.target.getAttribute('data-act');
+      console.log('[tilt-detail] click:', act, 'index=', idx);
+
+      if(act==='wifi'){ send('tilt:link',{ index:idx }); }
+      else if(act==='lamp'){ it.lampOn = !it.lampOn; render(); send('tilt:status',{ index:idx, lampOn: it.lampOn }); }
+      else if(act==='state'){ it.stateOn = !it.stateOn; render(); send('tilt:stateToggle',{ index:idx, stateOn: it.stateOn }); }
+      else if(act==='warn'){ it.warnOn = !it.warnOn; render(); send('tilt:warnToggle',{ index:idx, warnOn: it.warnOn }); }
+      else if(act==='alarm'){ send('tilt:alarm',{ index:idx }); }
+      else if(act==='thresh-dec'){ it.thresh = clamp(+(it.thresh - 0.1).toFixed(1), 0, 9.9); render(); send('tilt:thresholdSet',{ index:idx, value: it.thresh }); }
+      else if(act==='thresh-inc'){ it.thresh = clamp(+(it.thresh + 0.1).toFixed(1), 0, 9.9); render(); send('tilt:thresholdSet',{ index:idx, value: it.thresh }); }
+      else if(act==='thresh'){ send('tilt:thresholdSet',{ index:idx, value: it.thresh }); }
     });
+
+    // 父页 -> 子页的 WS 推送（若有）
     bridge.onWsMessage((m)=>{
-      if (m.cmd === 'modeDataResponse' && m.code === 0) {
-        // 期望 m.data.items
-        render(m.data.items || []);
-      }
-      // 也可处理服务端推送
+      try{
+        if(!m){ return; }
+        console.log('[tilt-detail] WS recv:', m);
+        if(m.cmd==='tilt:update'){
+          const i = Number(m?.data?.index);
+          const patch = m?.data?.patch || {};
+          const it = rows.find(x=>x.idx===i); if(!it) return;
+          Object.assign(it, patch); render();
+        }
+      }catch(err){ console.warn('[tilt-detail] onWsMessage error', err); }
     });
 
-    // 顶栏
+    // 模拟：300ms 更新 + 随机变化数量 + 随机切换数据类型
+    let tick = 0;
+    const t = setInterval(()=>{
+      tick++;
+
+      // 每 ~2 秒或一定概率，行数在 0~12 之间随机变化
+      if (tick % 7 === 0 || Math.random() < 0.15) {
+        const newN = randInt(0,12);
+        ensureRowsSize(newN);
+        render();
+      }
+
+      // 数值与类型更新
+      rows.forEach(r=>{
+        r.move = clamp(r.move + (Math.random()*2-1)*0.05, 0, 2.00);
+        if(r.type==='deg'){
+          r.curDeg = clamp(r.curDeg + (Math.random()*2-1)*0.08, 0, 90);
+        }else{
+          r.x = clamp(r.x + (Math.random()*2-1)*0.12, -30, 30);
+          r.y = clamp(r.y + (Math.random()*2-1)*0.12, -30, 30);
+          r.z = clamp(r.z + (Math.random()*2-1)*0.20, 0, 90);
+        }
+        if(Math.random()<0.04) r.batt = clamp(r.batt + (Math.random()*2-1)*2, 0, 100);
+
+        // 小概率切换类型（保持随机性）
+        if (Math.random() < 0.05) {
+          if (r.type==='deg') {
+            r.type='xyz';
+            r.x = +(Math.random()*20-10).toFixed(2);
+            r.y = +(Math.random()*20-10).toFixed(2);
+            r.z = +(Math.random()*30).toFixed(2);
+          } else {
+            r.type='deg';
+            r.curDeg = +(0.10 + Math.random()*0.90).toFixed(2);
+          }
+        }
+      });
+
+      render();
+    },300);
+    console.log('[tilt-detail] mock timer started (300ms).');
+
+    window.addEventListener('beforeunload',()=>{ try{clearInterval(t); console.log('[tilt-detail] mock timer cleared');}catch{} });
+
+    // 顶栏返回
     ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
   </script>
 </body>
