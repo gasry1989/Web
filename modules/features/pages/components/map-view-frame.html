@@ -106,7 +106,7 @@
       }
 
       function ensureInfoContent(){
-        if (!infoWindow) infoWindow = new AMap.InfoWindow({ isCustom:true, offset:new AMap.Pixel(0,-20), closeWhenClickMap:false });
+        if (!infoWindow) infoWindow = new AMap.InfoWindow({ isCustom:true, offset:new AMap.Pixel(0,-20), closeWhenClickMap:false, autoMove: false });
         if (!infoFrame) {
           var ifr=document.createElement('iframe');
           ifr.className='ov-iframe';
