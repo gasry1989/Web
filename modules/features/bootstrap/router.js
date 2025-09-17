@@ -3,13 +3,17 @@ import { closeAllModals } from '@ui/modal.js';
 import { mountUserListPage, unmountUserListPage } from '@features/pages/UserListPage.js';
 import { mountSitePage, unmountSitePage } from '@features/pages/SitePage.js';
 import { mountLoginPage, unmountLoginPage } from '@features/pages/LoginPage.js';
+import { mountDataCenterPage, unmountDataCenterPage } from '@features/pages/DataCenterPage.js';
+import { mountVideoCenterPage, unmountVideoCenterPage } from '@features/pages/VideoCenterPage.js';
 
 let currentUnmount = null;
 
 const routes = {
   '/login': { allowAnon: true, mount: mountLoginPage, unmount: unmountLoginPage },
   '/users': { allowAnon: false, mount: mountUserListPage, unmount: unmountUserListPage },
-  '/site' : { allowAnon: false, mount: mountSitePage, unmount: unmountSitePage }
+  '/site' : { allowAnon: false, mount: mountSitePage, unmount: unmountSitePage },
+  '/datacenter': { allowAnon: false, mount: mountDataCenterPage, unmount: unmountDataCenterPage },
+  '/videocenter': { allowAnon: false, mount: mountVideoCenterPage, unmount: unmountVideoCenterPage }
 };
 
 export function initRouter() {

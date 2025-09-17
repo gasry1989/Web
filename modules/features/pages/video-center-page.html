@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body>
+  <template id="tpl-video-center-page">
+    <style>
+      .vc-root{position:absolute;inset:0;display:flex;min-width:0;min-height:0;background:#0d1216;color:#cfd8dc}
+      .vc-left{width:320px;min-width:240px;max-width:50vw;display:flex;flex-direction:column;min-height:0;border-right:1px solid rgba(255,255,255,.08);position:relative;z-index:10;flex:0 0 auto}
+      .vc-left.collapsed{width:0!important;min-width:0!important;border-right:none;overflow:hidden}
+      .vc-splitter{width:12px;cursor:col-resize;position:relative;z-index:10;background:transparent}
+      .vc-splitter:hover{background:rgba(255,255,255,.04)}
+      .vc-left.collapsed + .vc-splitter{width:0!important;cursor:default;background:transparent}
+
+      .vc-center{flex:1 1 auto;display:grid;grid-template-rows:auto 1fr;min-width:0;min-height:0}
+      .vc-toolbar{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#0b121a;border-bottom:1px solid rgba(255,255,255,.08)}
+      .vc-presets{display:flex;flex-wrap:wrap;gap:6px}
+      .vc-presets button{min-width:38px;height:28px;padding:0 6px;border:1px solid #2e3a44;border-radius:4px;background:#1a232b;color:#cfd;cursor:pointer;font-size:12px}
+      .vc-presets button.active{border-color:#3d89ff;background:#18314a;color:#9ec3ff}
+
+      .vc-grid{position:relative;overflow:hidden;padding:10px;display:grid;gap:10px;grid-auto-rows:1fr;min-height:0}
+      .vc-grid[data-cols="1"]{grid-template-columns:repeat(1,1fr)}
+      .vc-grid[data-cols="2"]{grid-template-columns:repeat(2,1fr)}
+      .vc-grid[data-cols="3"]{grid-template-columns:repeat(3,1fr)}
+      .vc-grid[data-cols="4"]{grid-template-columns:repeat(4,1fr)}
+      .vc-grid[data-cols="5"]{grid-template-columns:repeat(5,1fr)}
+      .vc-grid[data-cols="6"]{grid-template-columns:repeat(6,1fr)}
+      .vc-grid[data-cols="10"]{grid-template-columns:repeat(10,1fr)}
+
+      .vc-cell{background:#111722;border:2px solid #3a4854;border-radius:6px;display:flex;flex-direction:column;overflow:hidden;min-height:120px}
+      .vc-hd{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;font-size:12px;background:#0f1b27;border-bottom:1px solid rgba(255,255,255,.08)}
+      .vc-bd{position:relative;flex:1 1 auto;min-height:0;background:#000;display:flex;align-items:center;justify-content:center}
+      .vc-bd video, .vc-bd canvas{display:block;width:100%;height:100%;object-fit:fill;background:#000}
+      .vc-hd [data-close]{width:20px;height:20px;border:none;background:transparent;color:#ccd;cursor:pointer}
+      .vc-hd [data-close]:hover{color:#fff}
+
+      /* 画中画：右下角小窗，跟随主画面大小缩放。最小值保护。 */
+      .vc-pip{position:absolute;right:6px;bottom:6px;width:26%;max-width:40%;min-width:80px;aspect-ratio:16/9;border:2px solid #3a4854;border-radius:4px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
+      .vc-pip > *{width:100%;height:100%}
+    </style>
+
+    <div class="vc-root" id="vcRoot">
+      <div class="vc-left" id="vcLeft"></div>
+      <div class="vc-splitter" id="vcSplitter" title="拖动调整左侧宽度"></div>
+
+      <div class="vc-center">
+        <div class="vc-toolbar">
+          <div>视频中心</div>
+          <div style="flex:1 1 auto"></div>
+          <div class="vc-presets" id="vcPresets"></div>
+        </div>
+        <div id="vcGrid" class="vc-grid" data-cols="2"></div>
+      </div>
+    </div>
+  </template>
+</body></html>
