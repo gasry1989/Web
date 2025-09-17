@@ -6,6 +6,7 @@
  */
 import { wsClient } from '@core/wsClient.js';
 import { eventBus } from '@core/eventBus.js';
+import { authLogout } from '@core/auth.js';
 
 const cmdHandlers = new Map();       // cmd -> Set<fn>
 const rawHandlers = new Set();       // 所有原始消息监听
@@ -41,6 +42,12 @@ function shallowMatch(msg, pattern) {
 }
 
 function dispatch(msg) {
+  // 特殊错误处理：token 被顶替 -> 退出登录并跳转登录页
+  if (msg && msg.cmd === 'error' && Number(msg.code) === 1004) {
+    try { authLogout(); } catch {}
+    return;
+  }
+
   // 1) 原始
   for (const fn of rawHandlers) { try { fn(msg); } catch (e) { console.error('[wsHub] raw handler error', e); } }
 
