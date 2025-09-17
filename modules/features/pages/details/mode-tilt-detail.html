@@ -6,16 +6,41 @@
   <style>
     html,body{height:100%;margin:0;background:#000;color:#e6f0ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;overflow:hidden;}
     *{box-sizing:border-box;}
-    .wrap{position:absolute;inset:48px 0 0 0;overflow-y:auto;overflow-x:hidden;background:#000;}
-    .hdr,.row{
+
+    /* 整页禁止出现任何滚动条 */
+    .wrap{
+      position:absolute; inset:48px 0 0 0; background:#000;
+      overflow:hidden; display:flex; flex-direction:column; min-height:0;
+    }
+
+    /* 头部固定在上方（不粘顶，不滚动） */
+    .hdr{
       display:grid;
       grid-template-columns: 160px 220px 180px 260px 140px 140px minmax(200px,1fr);
-      align-items:center; padding:12px 16px; column-gap:12px;
+      align-items:center; padding:10px 16px; column-gap:12px;
+      font-weight:700; border-bottom:1px solid #2a3642; background:#0a0f14; flex:0 0 auto;
     }
-    .hdr{font-weight:700;border-bottom:1px solid #2a3642;background:#0a0f14;position:sticky;top:0;z-index:2;}
-    .row{border-bottom:1px solid #1f2a3a;}
     .cell{display:flex;align-items:center;gap:14px;min-width:0;}
     .name{font-size:16px;font-weight:600;}
+
+    /* 列表区域：高度被均分为 12 份；不出现滚动条 */
+    #list{
+      flex:1 1 auto; min-height:0;
+      display:grid; grid-template-rows:repeat(12, 1fr); /* 均分 12 份 */
+      overflow:hidden;
+    }
+
+    /* 每一行占满各自网格行的高度 */
+    .row{
+      display:grid;
+      grid-template-columns: 160px 220px 180px 260px 140px 140px minmax(200px,1fr);
+      align-items:center; padding:8px 16px; column-gap:12px;
+      border-bottom:1px solid #1f2a3a;
+    }
+    .row.empty{
+      border-bottom:1px solid transparent; /* 空行视觉留白，不产生分割线 */
+      pointer-events:none;
+    }
 
     .wifi{width:26px;height:18px;position:relative;cursor:pointer;}
     .wifi::before,.wifi::after{content:'';position:absolute;left:0;right:0;margin:auto;border:2px solid #fff;border-top:none;border-left:none;border-bottom-right-radius:20px;transform:rotate(45deg);}
@@ -152,38 +177,44 @@
     // 初始
     ensureRowsSize(randInt(0,12));
 
-    // 渲染
+    // 渲染成固定 12 行（不足补空行，不滚动）
     function render(){
-      const html = rows.map(r=>`
-        <div class="row" data-idx="${r.idx}">
-          <div class="cell"><div class="name">${r.name}</div></div>
-          <div class="cell">
-            <div class="wifi click" data-act="wifi"></div>
-            <div class="lamp ${r.lampOn?'':'off'} click" data-act="lamp"></div>
-            <div class="switch ${r.stateOn?'on':''} click" data-act="state"></div>
+      const slots = Array.from({length:12}, (_,i)=> rows[i] || null);
+      const html = slots.map((r,slotIdx)=>{
+        if (!r) {
+          return `<div class="row empty" data-idx="-1"></div>`;
+        }
+        return `
+          <div class="row" data-idx="${r.idx}">
+            <div class="cell"><div class="name">${r.name}</div></div>
+            <div class="cell">
+              <div class="wifi click" data-act="wifi"></div>
+              <div class="lamp ${r.lampOn?'':'off'} click" data-act="lamp"></div>
+              <div class="switch ${r.stateOn?'on':''} click" data-act="state"></div>
+            </div>
+            <div class="cell">
+              <div class="switch ${r.warnOn?'on':''} click" data-act="warn"></div>
+            </div>
+            <div class="cell">
+              <div class="alarm click" data-act="alarm"></div>
+              <div class="caret left click" data-act="thresh-dec" title="-0.1°"></div>
+              <div class="thresh click" data-act="thresh">${r.thresh.toFixed(1)}°</div>
+              <div class="caret right click" data-act="thresh-inc" title="+0.1°"></div>
+            </div>
+            <div class="cell"><div class="batt"><div class="fill" style="width:${clamp(r.batt,0,100)}%"></div></div></div>
+            <div class="cell"><div class="val">${fmtDeg2(r.move)}</div></div>
+            <div class="cell">
+              ${r.type==='deg'
+                ? `<div class="val">${fmtDeg2(r.curDeg)}</div>`
+                : `<div class="xyz">
+                     <div>X:${fmtSigned2(r.x)}</div>
+                     <div>Y:${fmtSigned2(r.y)}</div>
+                     <div>Z:${fmtSigned2(r.z)}</div>
+                   </div>`}
+            </div>
           </div>
-          <div class="cell">
-            <div class="switch ${r.warnOn?'on':''} click" data-act="warn"></div>
-          </div>
-          <div class="cell">
-            <div class="alarm click" data-act="alarm"></div>
-            <div class="caret left click" data-act="thresh-dec" title="-0.1°"></div>
-            <div class="thresh click" data-act="thresh">${r.thresh.toFixed(1)}°</div>
-            <div class="caret right click" data-act="thresh-inc" title="+0.1°"></div>
-          </div>
-          <div class="cell"><div class="batt"><div class="fill" style="width:${clamp(r.batt,0,100)}%"></div></div></div>
-          <div class="cell"><div class="val">${fmtDeg2(r.move)}</div></div>
-          <div class="cell">
-            ${r.type==='deg'
-              ? `<div class="val">${fmtDeg2(r.curDeg)}</div>`
-              : `<div class="xyz">
-                   <div>X:${fmtSigned2(r.x)}</div>
-                   <div>Y:${fmtSigned2(r.y)}</div>
-                   <div>Z:${fmtSigned2(r.z)}</div>
-                 </div>`}
-          </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
       list.innerHTML = html;
       refreshHeaderSwitches();
       console.log('[tilt-detail] render done. rows =', rows.length);
@@ -234,7 +265,9 @@
     // 行点击交互
     list.addEventListener('click',(e)=>{
       const row = e.target.closest('.row'); if(!row) return;
-      const idx = Number(row.getAttribute('data-idx'));
+      const idxAttr = row.getAttribute('data-idx');
+      const idx = Number(idxAttr);
+      if (idx < 0) return; // 空行，无交互
       const it = rows.find(x=>x.idx===idx); if(!it) return;
       const act = e.target.getAttribute('data-act');
       console.log('[tilt-detail] click:', act, 'index=', idx);
@@ -264,7 +297,7 @@
       }catch(err){ console.warn('[tilt-detail] onWsMessage error', err); }
     });
 
-    // 模拟：300ms 更新 + 随机变化数量 + 随机切换数据类型
+    // 模拟：300ms 更新 + 随机变化数量 + 随机切换数据类型（无滚动）
     let tick = 0;
     const t = setInterval(()=>{
       tick++;

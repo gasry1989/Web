@@ -4,101 +4,502 @@
   <meta charset="utf-8"/>
   <title>位移·倾角模式详情</title>
   <style>
-    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;overflow:hidden;}
     *{box-sizing:border-box;}
-    .wrap{ position:absolute; inset:48px 0 0 0; color:#e6f0ff; padding:10px 14px; overflow:auto;}
-    .panel{ border:1px solid #2ea6a6; border-radius:6px; padding:10px; margin-bottom:12px; }
-    .title{ font-size:18px; text-align:center; margin-bottom:8px; }
-    .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
-    .row{ display:grid; grid-template-columns: auto auto auto 1fr; align-items:center; column-gap:10px; border-bottom:1px solid #1f2a3a; padding:10px 0; }
-    .badge{ width:24px;height:24px;border-radius:50%;border:1px solid #48c2ff;color:#48c2ff;display:flex;align-items:center;justify-content:center;font-weight:700;}
-    .wifi::before{ content:''; width:18px; height:14px; background:
-      radial-gradient(circle at 4px 14px,#fff 2px,transparent 3px),
-      radial-gradient(circle at 9px 9px, #fff 2px, transparent 3px),
-      radial-gradient(circle at 14px 4px,#fff 2px,transparent 3px); display:inline-block; }
-    .batt{ position:relative; width:36px; height:14px; border:2px solid #9f9; border-radius:2px;}
-    .batt::after{ content:''; position:absolute; right:-5px; top:3px; width:3px; height:8px; background:#9f9; }
-    .batt .fill{ position:absolute; left:0; top:0; bottom:0; width:70%; background:#27e65e;}
-    .siren{ width:22px; height:22px; border-radius:50%; border:2px solid #fff; display:inline-flex; align-items:center; justify-content:center;}
-    .val{ color:#aefcae; font-weight:700; text-align:right; }
-    .rightBox{ border:1px solid #2ea6a6; border-radius:6px; padding:10px; }
-    .kv{ display:grid; grid-template-columns: 90px 1fr auto; align-items:center; column-gap:10px; padding:6px 0; }
-    .inputBox{ border:2px solid #2ea6a6; border-radius:6px; padding:8px 10px; min-width:120px; text-align:center; font-weight:700; background:#0c141a; color:#aefcae;}
-    .wave{ height:40px; background:
-      linear-gradient(0deg, rgba(46,166,166,.35) 2px, transparent 2px) repeat-y 0 0/100% 10px,
-      linear-gradient(90deg, rgba(46,166,166,.35) 2px, transparent 2px) repeat-x 0 0/60px 100%;
-      border:2px solid #2ea6a6; border-radius:6px; }
-    .log{ border:1px solid #2ea6a6; border-radius:6px; padding:10px; margin-top:10px; }
-    .logTitle{ text-align:center; margin-bottom:6px; }
-    .logList{ font-family: ui-monospace,Consolas,monospace; line-height:1.8; }
-    .btnTiny{ padding:6px 10px; border-radius:6px; background:#1f7fb8; border:1px solid rgba(255,255,255,.25); color:#fff; cursor:pointer; white-space:nowrap; }
+
+    /* 顶部栏以下区域，禁止全局滚动 */
+    .wrap{
+      position:absolute;inset:48px 0 0 0;background:#000;overflow:hidden;
+      /* 波浪线图片：替换为你真实图片即可 */
+      --wave-green:url('/assets/wave-green.png');
+      --wave-red:url('/assets/wave-red.png');
+      /* 若暂时没有图片，将自动使用无边框的渐变细线占位（见下方 background-image 的第二层） */
+    }
+
+    /* 主面板填满 */
+    .panel{
+      position:relative;margin:10px 12px;border:2px solid #2ea6a6;border-radius:8px;padding:12px;
+      height:calc(100% - 20px);
+      display:flex;flex-direction:column;gap:10px;min-height:0;
+    }
+
+    /* 标题行 */
+    .panelTitle{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;}
+    .title-center{justify-self:center;text-align:center;font-size:18px;font-weight:700;color:#d7f4ff;}
+
+    /* 图标/开关 */
+    .iconBtn{
+      width:34px;height:34px;border:2px solid #e6f0ff;border-radius:50%;
+      display:inline-flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
+      transition:transform .15s, filter .15s;
+    }
+    .iconBtn:hover{filter:brightness(1.2);}
+    .iconBtn:active{transform:scale(.96);}
+    .ic-ab{font-weight:800;font-size:12px;letter-spacing:1px;}
+    .ic-re::before{content:'';width:16px;height:16px;border:2px solid #e6f0ff;border-top-color:transparent;border-radius:50%;display:block;}
+    .ic-bell::before{content:'⎍';font-size:16px;line-height:1;}
+    .switch{position:relative;width:56px;height:28px;background:#e9eef5;border-radius:14px;box-shadow:inset 0 2px 4px rgba(0,0,0,.35);cursor:pointer;flex:0 0 auto;}
+    .switch::after{content:'';position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:.2s;}
+    .switch.on{background:#2ea866;}
+    .switch.on::after{left:31px;}
+
+    /* 两列：左固定宽，右自适应。容器无滚动 */
+    .grid{display:grid;grid-template-columns: 440px 1fr;gap:16px;min-height:0;flex:1;}
+    @media (max-width:1100px){ .grid{grid-template-columns: 380px 1fr;} }
+
+    /* 左列：四总控 + 探头列表（无滚动） */
+    .leftCol{display:flex;flex-direction:column;gap:10px;min-height:0;}
+    .leftControls{border:1px solid rgba(46,166,166,.5);border-radius:8px;padding:8px 12px;background:rgba(0,0,0,.35);}
+    .controls-4{display:grid;grid-template-columns:repeat(4,1fr);align-items:center;}
+    .controls-4 .cell{display:flex;align-items:center;justify-content:center;}
+    .controls-4 .switch{margin-inline:auto;}
+
+    /* 探头列表：固定 12 行网格，不足留白，达到 12 也不滚动 */
+    .probeList{flex:1;min-height:0;display:grid;grid-template-rows:repeat(12, 1fr);grid-auto-flow:row;gap:10px;overflow:hidden;}
+    .row{
+      align-self:stretch;
+      display:grid;grid-template-columns:auto auto auto auto auto 1fr;align-items:center;gap:12px;
+      padding:8px;border:1px solid rgba(46,166,166,.5);border-radius:8px;background:rgba(0,0,0,.35);cursor:pointer;min-height:0;
+    }
+    .row.selected{border:2px solid #2ea6a6;box-shadow:0 0 0 2px rgba(46,166,166,.25) inset;}
+    .tag{padding:2px 10px;border:2px solid #2ea6a6;border-radius:999px;color:#2ea6a6;font-weight:700;}
+    .badge{width:28px;height:28px;border-radius:50%;border:2px solid #48c2ff;color:#48c2ff;display:flex;align-items:center;justify-content:center;font-weight:800;}
+    .wifi{width:26px;height:18px;position:relative;filter:grayscale(0);}
+    .wifi.dim{filter:grayscale(1) brightness(.6);}
+    .wifi::before,.wifi::after{content:'';position:absolute;left:0;right:0;margin:auto;border:2px solid #fff;border-top:none;border-left:none;border-bottom-right-radius:20px;transform:rotate(45deg);}
+    .wifi::before{width:20px;height:20px;top:-2px;}
+    .wifi::after{width:14px;height:14px;top:3px;}
+    .batt{position:relative;width:54px;height:18px;border:2px solid #9f9;border-radius:3px;}
+    .batt::after{content:'';position:absolute;right:-6px;top:4px;width:4px;height:8px;background:#9f9;border-radius:1px;}
+    .batt .fill{position:absolute;left:0;top:0;bottom:0;background:#27e65e;width:60%;}
+    .bell{width:30px;height:30px;border-radius:50%;border:2px solid #e6f0ff;display:flex;align-items:center;justify-content:center;}
+
+    /* 列表末尾“数值+波浪线”：垂直堆叠且水平居中；波浪线=纯图片，无边框 */
+    .valStack{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:0;}
+    .val{color:#2af08b;font-weight:800;white-space:nowrap;text-align:center;}
+    .spark{
+      height:18px;min-width:40px;
+      background-repeat:no-repeat;background-position:center;background-size:contain;
+      /* 第二层为占位渐变细线（无边框），当图片路径无效时可见 */
+      background-image: linear-gradient(180deg, rgba(46,166,166,.0) 49%, rgba(46,166,166,.7) 50%, rgba(46,166,166,.0) 51%);
+    }
+    .spark.green{ background-image: var(--wave-green), linear-gradient(180deg, rgba(46,166,166,.0) 49%, rgba(46,166,166,.7) 50%, rgba(46,166,166,.0) 51%); }
+    .spark.red{   background-image: var(--wave-red),   linear-gradient(180deg, rgba(255,90,90,.0) 49%, rgba(255,90,90,.7) 50%, rgba(255,90,90,.0) 51%); }
+
+    /* 右列详情：填满高度 */
+    .detail{border:1px solid #2ea6a6;border-radius:8px;padding:12px;display:flex;flex-direction:column;min-height:0;height:100%;}
+    .dt-head{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:12px;margin-bottom:6px;}
+    .dt-title{font-size:18px;font-weight:800;}
+    /* 仅三个图标，等距排列；不要多余图标 */
+    .dt-icons{width:180px;display:grid;grid-template-columns:repeat(3,1fr);justify-items:center;align-items:center;}
+    .dt-switch{display:flex;align-items:center;justify-content:flex-end;}
+
+    /* 主体两列 */
+    .dt-body{display:grid;grid-template-columns:1fr 1fr;gap:14px;min-height:0;}
+    .kv{display:grid;grid-template-columns:100px 1fr auto;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+    .kv .num{color:#2af08b;font-weight:800;}
+    .angles{display:flex;flex-direction:column;gap:6px;}
+    .gas-status.ok{color:#2af08b;}
+    .gas-status.err{color:#ff6b6b;}
+
+    /* 报警值控件：左箭头-值胶囊-右箭头（用于加/减） */
+    .thresLine{display:grid;grid-template-columns:30px 1fr 30px;align-items:center;gap:10px;}
+    .thBtn{width:0;height:0;border-top:12px solid transparent;border-bottom:12px solid transparent;cursor:pointer;}
+    .thBtn.left{border-right:18px solid #cfe3ff;}
+    .thBtn.right{border-left:18px solid #cfe3ff;}
+    .pill{border:2px solid #2ea6a6;border-radius:6px;background:#0c141a;color:#aefcae;font-weight:800;text-align:center;padding:10px 12px;}
+    .pill .v{color:#2af08b;}
+
+    /* 右侧波浪线=纯图片，无边框 */
+    .wave-img{
+      height:60px;
+      background-repeat:no-repeat;background-position:center;background-size:contain;
+      /* 默认占位细线，无边框 */
+      background-image: linear-gradient(180deg, rgba(46,166,166,.0) 49%, rgba(46,166,166,.35) 50%, rgba(46,166,166,.0) 51%),
+                       linear-gradient(90deg, rgba(46,166,166,.25) 2px, transparent 2px);
+    }
+    .wave-img.green{ background-image: var(--wave-green), linear-gradient(180deg, rgba(46,166,166,.0) 49%, rgba(46,166,166,.35) 50%, rgba(46,166,166,.0) 51%); }
+    .wave-img.red{   background-image: var(--wave-red),   linear-gradient(180deg, rgba(255,90,90,.0) 49%, rgba(255,90,90,.4) 50%, rgba(255,90,90,.0) 51%); }
+    .mode-tag{display:inline-block;margin-top:6px;padding:6px 10px;border-radius:6px;border:2px solid #2ea6a6;background:#0c141a;color:#aefcae;font-weight:800;cursor:pointer;}
+
+    /* 数据记录：独占剩余高度，可滚动（自定义滚动条样式） */
+    .dt-log{margin-top:8px;display:flex;flex-direction:column;flex:1;min-height:0;}
+    .log{border:1px solid #2ea6a6;border-radius:8px;padding:10px;display:flex;flex-direction:column;min-height:0;flex:1;}
+    .logTitle{text-align:center;margin-bottom:6px;font-weight:800;}
+    .logList{font-family:ui-monospace,Consolas,monospace;line-height:1.8;overflow:auto;flex:1;min-height:0;}
+    .logList{scrollbar-width:thin;scrollbar-color:#2ea6a6 #0b131a;}
+    .logList::-webkit-scrollbar{width:10px;height:10px;}
+    .logList::-webkit-scrollbar-track{background:#0b131a;border-radius:6px;}
+    .logList::-webkit-scrollbar-thumb{background:#2ea6a6;border-radius:6px;border:2px solid #0b131a;}
+    .logList::-webkit-scrollbar-thumb:hover{background:#36c0c0;}
+
+    .btn{padding:8px 12px;border-radius:8px;background:#1f7fb8;border:1px solid rgba(255,255,255,.25);color:#fff;cursor:pointer;white-space:nowrap;font-weight:700;}
+    .btnLine{margin-top:8px;display:flex;gap:8px;justify-content:flex-end;}
+    .footer{margin-top:8px;color:#8fb;}
+
+    .placeholder{display:flex;align-items:center;justify-content:center;height:100%;color:#89a;}
   </style>
 </head>
 <body>
   <script type="module">
     import { mountTopbar, detailBridge } from './common/detail-common.js';
-    const qs = new URLSearchParams(location.search);
-    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
-    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNo || devId;
-    const bridge = detailBridge(); bridge.ready({ page:'mode-disp-tilt', devId, devNo });
 
+    // 读取 devId/devNo + 桥接
+    const qs = new URLSearchParams(location.search);
+    let devId = qs.get('devId')||''; const devNoQS = qs.get('devNo')||'';
+    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNoQS || devId || '设备';
+    const bridge = detailBridge(); bridge.ready({ page:'mode-disp-tilt', devId, devNo: devNoQS });
+
+    if (!devId) {
+      try { const init = await bridge.waitInit(); devId = String(init?.devId || ''); if (init?.devNo && !devNoQS) ui.lblDevNo.textContent = init.devNo || devId; }
+      catch {}
+    }
+
+    // DOM 布局
     const wrap = document.createElement('div'); wrap.className='wrap';
     wrap.innerHTML = `
       <div class="panel">
-        <div class="title">设备名称/编号 - 在线：3台</div>
+        <div class="panelTitle">
+          <div></div>
+          <div class="title-center" id="lblTitle">设备名称/编号 - 在线：3台</div>
+          <div></div>
+        </div>
+
         <div class="grid">
-          <div id="leftList">
-            <div class="row"><span>位移</span><span class="badge">20</span><span class="wifi"></span><span class="batt"><span class="fill"></span></span><span class="siren">⎍</span><span class="val">0.000m</span></div>
-            <div class="row"><span>位移</span><span class="badge">89</span><span class="wifi"></span><span class="batt"><span class="fill"></span></span><span class="siren">⎍</span><span class="val">0.000m</span></div>
-            <div class="row" style="border:2px solid #2ea6a6; border-radius:6px; padding:10px;">
-              <span>倾角</span><span class="badge">93</span><span class="wifi"></span><span class="batt"><span class="fill" style="width:70%"></span></span><span class="siren">⎍</span><span class="val">0.00°</span>
-            </div>
-          </div>
-          <div class="rightBox">
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-              <div>
-                <div class="kv"><span>角 度：</span><span>X：-0.06°<br/>Y：0.01°<br/>Z：2.14°</span></div>
-                <div class="kv"><span>距离：</span><span style="color:#2af08b;font-weight:700;">2.448</span><span>m</span></div>
-                <div class="kv"><span>移动值：</span><span style="color:#2af08b;font-weight:700;">0.000</span><span>m</span></div>
-                <div class="log">
-                  <div class="logTitle">数据记录</div>
-                  <div class="logList" id="logList">
-                    2025-06-26 14:49:34 关闭监控<br/>
-                    2025-06-26 14:49:28 开启监控<br/>
-                    2025-06-26 14:45:14 报警复位<br/>
-                    2025-06-26 14:45:14 震动报警 中灵敏度
-                  </div>
-                  <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end;">
-                    <button class="btnTiny" id="btnLogAll">全部</button>
-                    <button class="btnTiny" id="btnLogFilter">筛选 ⬆</button>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <div class="kv"><span>报警值</span><div class="inputBox" id="boxTiltThresh">0.3°</div><div class="btnTiny" id="btnTiltThreshDec">◀</div></div>
-                <div class="kv"><span>移动值</span><div class="inputBox" id="boxMoveVal">0.00°</div><div class="wave"></div></div>
-                <div class="kv"><span>模式：</span><div class="inputBox" id="boxModeName">中灵敏度</div></div>
-                <div class="kv"><span>报警值</span><div class="inputBox" id="boxMoveThresh">3.330</div><div class="btnTiny" id="btnMoveThreshDec">◀</div></div>
+          <!-- 左列：四总控 + 探头列表 -->
+          <div class="leftCol">
+            <div class="leftControls">
+              <div class="controls-4">
+                <div class="cell"><div class="iconBtn ic-ab" id="btnListAB" title="A/B">A/B</div></div>
+                <div class="cell"><div class="iconBtn ic-re" id="btnListRefresh" title="刷新"></div></div>
+                <div class="cell"><div class="iconBtn ic-bell" id="btnListBell" title="铃声"></div></div>
+                <div class="cell"><div class="switch" id="swListMonitor" title="总开关"></div></div>
               </div>
             </div>
-            <div style="margin-top:8px; color:#8fb;">气压：998.823 hps　　海拔：120.09 m</div>
+            <div class="probeList" id="leftList"></div>
           </div>
+
+          <!-- 右列：详情（倾角/位移） -->
+          <div class="detail" id="rightDetail"></div>
         </div>
       </div>
     `;
     document.body.appendChild(wrap);
 
-    // WS 打开并请求模式数据（确保仅连接一次）
-    const ch = await bridge.wsOpen({ kind:'mode', devId, modeId: 2 });
-    bridge.wsSend(ch, {
-      cmd: 'modeData',
-      to: { type: 1, id: devId },
-      data: { modeId: 200 }
-    });
-    bridge.onWsMessage((m)=>{ if (m.cmd==='modeDataResponse' && m.code===0) { /* 渲染 */ } });
+    // ---------------- WS 通道 ----------------
+    let ch = null;
+    const to = { type:1, id: devId };
+    try {
+      bridge.wsOpen({ kind:'mode', devId, modeId:2 })
+        .then(c => { ch = c; console.log('[disptilt-detail] ws opened', { ch, devId }); })
+        .catch(err => console.warn('[disptilt-detail] ws open error', err));
+    } catch (e) { console.warn('[disptilt-detail] ws open exception', e); }
+    function send(cmd, data){
+      const payload = { cmd, to, data };
+      console.log('[disptilt-detail] click send', payload);
+      if (ch) bridge.wsSend(ch, payload); else console.warn('[disptilt-detail] WS not ready, skip send');
+    }
+    bridge.onWsMessage(m => { console.log('[disptilt-detail] recv', m); });
 
-    // 顶栏
+    // ---------------- 模拟数据（探头 0~12） ----------------
+    const leftList = document.getElementById('leftList');
+    const state = {
+      probes: [],
+      selectedId: null,
+      modeIdx: 1,
+      monitorOn: false,
+      listMonitorOn: false,
+      tilt: { tiltThresh: 0.3, moveThresh: 3.330, angles:{x:0,y:0,z:0}, distance: 3.176, moveVal: 0.340, waveBad:false },
+      disp: { cur:120.001, move:0.001, gas1:3.1, gas2:18.8, thresh:1.001, alarms:['可燃低报','氧气高报'] }
+    };
+    const MODES = ['低灵敏度','中灵敏度','高灵敏度'];
+
+    function rnd(a,b){ return Math.random()*(b-a)+a; }
+    function clamp(v,min,max){ return v<min?min:(v>max?max:v); }
+    function fmtSigned2(v){ const s=v>=0?'+':'-'; const abs=Math.abs(v); const t=abs.toFixed(2).split('.'); return s+String(t[0]).padStart(3,'0')+'.'+(t[1]||'00')+'°'; }
+    function fmt02(v,u='°'){ return v.toFixed(2)+u; }
+    function fmt03(v,u='m'){ return v.toFixed(3)+u; }
+
+    function genProbes(){
+      const n = Math.floor(rnd(0,13)); // 0~12
+      const arr = [];
+      for (let i=0;i<n;i++){
+        const isTilt = Math.random()<0.5;
+        arr.push({
+          id: i+1,
+          type: isTilt?'tilt':'disp',
+          badge: Math.floor(rnd(10,99)),
+          wifi: Math.random()>0.2,
+          batt: Math.floor(rnd(40,100)),
+          alarmOn: Math.random()>0.4,
+          value: isTilt ? rnd(0,1.0) : rnd(0,0.010)
+        });
+      }
+      state.probes = arr;
+      const firstTilt = arr.find(x=>x.type==='tilt');
+      state.selectedId = (firstTilt || arr[0])?.id ?? null;
+    }
+
+    function renderProbeList(){
+      const items = (state.probes||[]).slice(0,12);
+      leftList.innerHTML = items.map(it=>{
+        const isSel = it.id === state.selectedId;
+        const valueText = it.type==='tilt' ? fmt02(it.value,'°') : fmt03(it.value,'m');
+        const tail = it.type==='tilt'
+          ? `<div class="valStack">
+               <div class="val">${valueText}</div>
+               <div class="spark ${state.tilt.waveBad?'red':'green'}" data-spark></div>
+             </div>`
+          : `<div class="val">${valueText}</div>`;
+        return `
+          <div class="row ${isSel?'selected':''}" data-id="${it.id}">
+            <div class="tag">${it.type==='tilt'?'倾角':'位移'}</div>
+            <div class="badge">${it.badge}</div>
+            <div class="wifi ${it.wifi?'':'dim'}" data-act="wifi"></div>
+            <div class="batt"><div class="fill" style="width:${clamp(it.batt,0,100)}%"></div></div>
+            <div class="bell" data-act="bell">⎍</div>
+            ${tail}
+          </div>
+        `;
+      }).join('');
+      syncSparkWidth();
+    }
+
+    // 波浪线宽度跟随数值文本宽度
+    function syncSparkWidth(){
+      leftList.querySelectorAll('.row').forEach(row=>{
+        const val = row.querySelector('.valStack .val');
+        const spark = row.querySelector('[data-spark]');
+        if (val && spark) {
+          const w = Math.ceil(val.getBoundingClientRect().width);
+          spark.style.width = Math.max(40, w) + 'px';
+        }
+      });
+    }
+
+    function mountDetail(){
+      const cur = state.probes.find(x=>x.id===state.selectedId);
+      const rd = document.getElementById('rightDetail');
+      if (!cur){ rd.innerHTML = '<div class="placeholder">暂无探头</div>'; return; }
+
+      if (cur.type==='tilt'){
+        // 倾角详情：仅三个图标（A/B、刷新、铃铛）+ 开关
+        rd.innerHTML = `
+          <div class="dt-head">
+            <div class="dt-title">倾角探头${cur.badge}号</div>
+            <div class="dt-icons">
+              <div class="iconBtn ic-ab" id="btnAB2">A/B</div>
+              <div class="iconBtn ic-re" id="btnRefresh2"></div>
+              <div class="iconBtn ic-bell" id="btnBell2"></div>
+            </div>
+            <div class="dt-switch"><div class="switch ${state.monitorOn?'on':''}" id="swMonitor2"></div></div>
+          </div>
+
+          <div class="dt-body">
+            <div>
+              <div class="kv"><div>角 度：</div>
+                <div class="angles">
+                  <div>X：<span class="num" id="angX">${fmtSigned2(state.tilt.angles.x)}</span></div>
+                  <div>Y：<span class="num" id="angY">${fmtSigned2(state.tilt.angles.y)}</span></div>
+                  <div>Z：<span class="num" id="angZ">${fmtSigned2(state.tilt.angles.z)}</span></div>
+                </div>
+              </div>
+              <div class="kv"><div>气体1：</div><div class="gas-status err" id="gas1">离线</div></div>
+              <div class="kv"><div>气体2：</div><div class="gas-status err" id="gas2">离线</div></div>
+              <div class="kv"><div>距 离：</div><div class="num" id="distance">${state.tilt.distance.toFixed(3)}</div><div>m</div></div>
+              <div class="kv"><div>移动值：</div><div class="num" id="moveVal">${state.tilt.moveVal.toFixed(3)}</div><div>m</div></div>
+            </div>
+
+            <div>
+              <div class="kv">
+                <div>报警值</div>
+                <div class="thresLine">
+                  <div class="thBtn left" id="tiltThL" title="-步进"></div>
+                  <div class="pill"><span class="v" id="boxTiltThresh">${state.tilt.tiltThresh.toFixed(1)}°</span></div>
+                  <div class="thBtn right" id="tiltThR" title="+步进"></div>
+                </div>
+              </div>
+
+              <div class="kv">
+                <div>移动值</div>
+                <div class="pill"><span class="v" id="boxMoveShow">${state.tilt.moveVal.toFixed(2)}°</span></div>
+              </div>
+              <!-- 波浪线：纯图片，无边框 -->
+              <div class="wave-img ${state.tilt.waveBad?'red':'green'}" id="waveBox"></div>
+              <div><span class="mode-tag" id="btnMode">模式：${MODES[state.modeIdx]}</span></div>
+
+              <div class="kv" style="margin-top:8px;">
+                <div>报警值</div>
+                <div class="thresLine">
+                  <div class="thBtn left" id="moveThL" title="-步进"></div>
+                  <div class="pill"><span class="v" id="boxMoveThresh">${state.tilt.moveThresh.toFixed(3)}</span></div>
+                  <div class="thBtn right" id="moveThR" title="+步进"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dt-log">
+            <div class="log">
+              <div class="logTitle">数据记录</div>
+              <div class="logList" id="logList"></div>
+              <div class="btnLine">
+                <button class="btn" id="btnLogAll">全部</button>
+                <button class="btn" id="btnLogFilter">筛选 ⬆</button>
+              </div>
+            </div>
+            <div class="footer">气压：<span id="pressure">1000.885</span> hps　　海拔：<span id="altitude">120.63</span> m</div>
+          </div>
+        `;
+      } else {
+        // 位移详情
+        rd.innerHTML = `
+          <div class="dt-head">
+            <div class="dt-title">位移探头${cur.badge}号</div>
+            <div class="dt-icons">
+              <div class="iconBtn ic-ab" id="btnAB2">A/B</div>
+              <div class="iconBtn ic-re" id="btnRefresh2"></div>
+              <div class="iconBtn ic-bell" id="btnBell2"></div>
+            </div>
+            <div class="dt-switch"><div class="switch ${state.monitorOn?'on':''}" id="swMonitor2"></div></div>
+          </div>
+
+          <div class="dt-body">
+            <div>
+              <div class="kv"><div>当前值：</div><div class="num" id="dispCur">${state.disp.cur.toFixed(3)}</div><div>m</div></div>
+              <div class="kv"><div>移动值：</div><div class="num" id="dispMove">${state.disp.move.toFixed(3)}</div><div>m</div></div>
+              <div class="kv"><div>可燃Ex：</div><div class="num" id="dispGas1" style="color:#ff6b6b;">${state.disp.gas1.toFixed(1)}</div><div>%LEL</div></div>
+              <div class="kv"><div>氧气O2：</div><div class="num" id="dispGas2" style="color:#2af08b;">${state.disp.gas2.toFixed(1)}</div><div>%Vol</div></div>
+            </div>
+
+            <div>
+              <div class="kv">
+                <div>报警值</div>
+                <div class="thresLine">
+                  <div class="thBtn left" id="dispThL" title="-步进"></div>
+                  <div class="pill"><span class="v" id="dispThresh">${state.disp.thresh.toFixed(3)}</span></div>
+                  <div class="thBtn right" id="dispThR" title="+步进"></div>
+                </div>
+              </div>
+              <div style="padding:8px 0 0 0;display:flex;flex-direction:column;gap:8px;color:#ff6b6b;font-weight:800;">
+                <div id="dispAlarm1">${state.disp.alarms[0]}</div>
+                <div id="dispAlarm2">${state.disp.alarms[1]}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dt-log">
+            <div class="log">
+              <div class="logTitle">数据记录</div>
+              <div class="logList" id="logList"></div>
+              <div class="btnLine">
+                <button class="btn" id="btnLogAll">全部</button>
+                <button class="btn" id="btnLogFilter">筛选 ⬆</button>
+              </div>
+            </div>
+            <div class="footer">气压：<span id="pressure">1000.885</span> hps　　海拔：<span id="altitude">120.63</span> m</div>
+          </div>
+        `;
+      }
+
+      // 日志填充
+      const logList = rd.querySelector('#logList');
+      if (logList) {
+        logList.innerHTML = ['关闭监控','开启监控','报警复位','震动报警 中灵敏度']
+          .map((t,i)=> `${fmtTs(-i*6)} ${t}`).join('<br/>');
+      }
+
+      // 绑定右侧交互
+      const bind = (sel, act, extra={})=>{
+        const el = rd.querySelector(sel); if(!el) return;
+        el.onclick = ()=>{
+          const cur2 = state.probes.find(x=>x.id===state.selectedId);
+          console.log('[disptilt-detail] click', act, { devId, id: cur2?.id, ...extra });
+          send(act, { id: cur2?.id, ...extra });
+        };
+      };
+      bind('#btnAB2','mode:ab'); bind('#btnRefresh2','mode:refresh'); bind('#btnBell2','mode:bell');
+      const sw2 = rd.querySelector('#swMonitor2'); if (sw2) sw2.onclick = ()=>{ sw2.classList.toggle('on'); state.monitorOn = sw2.classList.contains('on'); send('mode:monitor',{ on: state.monitorOn }); };
+
+      // 倾角报警值
+      bind('#tiltThL','tilt:thresh',{ step:-0.1 });
+      bind('#tiltThR','tilt:thresh',{ step:+0.1 });
+      bind('#moveThL','tilt:moveThresh',{ step:-0.01 });
+      bind('#moveThR','tilt:moveThresh',{ step:+0.01 });
+      const btnMode = rd.querySelector('#btnMode'); if (btnMode) btnMode.onclick=()=>{ state.modeIdx=(state.modeIdx+1)%MODES.length; btnMode.textContent='模式：'+MODES[state.modeIdx]; send('tilt:mode',{ mode:MODES[state.modeIdx] }); };
+
+      // 位移报警值
+      bind('#dispThL','disp:thresh',{ step:-0.01 });
+      bind('#dispThR','disp:thresh',{ step:+0.01 });
+
+      // 日志按钮
+      bind('#btnLogAll','log:all'); bind('#btnLogFilter','log:filter');
+    }
+
+    function fmtTs(offsetSec){ const d=new Date(Date.now()+(offsetSec||0)*1000); const p=n=>(n<10?'0':'')+n; return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+    function renderAll(){ renderProbeList(); mountDetail(); }
+
+    // 初次
+    genProbes(); renderAll();
+
+    // 左列事件（探头行）
+    leftList.addEventListener('click', (e)=>{
+      const row = e.target.closest('.row'); if(!row) return;
+      const id = Number(row.dataset.id);
+      const act = e.target.getAttribute('data-act') || 'select';
+      const cur = state.probes.find(it=>it.id===id); if(!cur) return;
+
+      if (act === 'select'){
+        state.selectedId = id; renderAll();
+        console.log('[disptilt-detail] select probe',{ devId, id, type:cur.type });
+        send('list:select', { id });
+      } else if (act === 'wifi'){
+        console.log('[disptilt-detail] probe wifi',{ devId, id }); send('list:wifi', { id });
+      } else if (act === 'bell'){
+        cur.alarmOn = !cur.alarmOn;
+        console.log('[disptilt-detail] probe bell toggle',{ devId, id, on: cur.alarmOn }); send('list:bell', { id, on: cur.alarmOn });
+      }
+    });
+
+    // 左列四总控
+    const bindTopLeft = (id, cmd)=>{ const el=document.getElementById(id); if(!el) return; el.onclick=()=>{ console.log('[disptilt-detail] list-control', cmd, { devId }); send(cmd,{}); }; };
+    bindTopLeft('btnListAB','list:ab'); bindTopLeft('btnListRefresh','list:refresh'); bindTopLeft('btnListBell','list:bell');
+    const swList = document.getElementById('swListMonitor'); if (swList) swList.onclick=()=>{ swList.classList.toggle('on'); state.listMonitorOn = swList.classList.contains('on'); send('list:monitor',{ on: state.listMonitorOn }); };
+
+    // 模拟动画：每 300ms 微动
+    const timer = setInterval(()=>{
+      if (Math.random()<0.15){
+        const oldSel = state.selectedId; genProbes();
+        if (state.probes.some(p=>p.id===oldSel)) state.selectedId=oldSel;
+      }
+      state.probes.forEach(p=>{
+        if (p.type==='tilt') p.value = clamp(p.value + (Math.random()*2-1)*0.05, 0, 5);
+        else p.value = clamp(p.value + (Math.random()*2-1)*0.001, 0, 5);
+        if (Math.random()<0.05) p.batt = clamp(p.batt + (Math.random()*2-1)*1.5, 0, 100);
+      });
+      state.tilt.angles.x = clamp(state.tilt.angles.x + (Math.random()*2-1)*0.12, -30, 30);
+      state.tilt.angles.y = clamp(state.tilt.angles.y + (Math.random()*2-1)*0.12, -30, 30);
+      state.tilt.angles.z = clamp(state.tilt.angles.z + (Math.random()*2-1)*0.20, 0, 90);
+      state.tilt.moveVal = clamp(state.tilt.moveVal + (Math.random()*2-1)*0.02, 0, 5);
+      state.tilt.distance = clamp(state.tilt.distance + (Math.random()*2-1)*0.03, 0, 30);
+      if (Math.random()<0.08) state.tilt.waveBad = !state.tilt.waveBad;
+
+      state.disp.cur = clamp(state.disp.cur + (Math.random()*2-1)*0.12, 0, 999);
+      state.disp.move = clamp(state.disp.move + (Math.random()*2-1)*0.005, 0, 10);
+      if (Math.random()<0.05) state.disp.gas1 = clamp(state.disp.gas1 + (Math.random()*2-1)*0.3, 0, 100);
+      if (Math.random()<0.05) state.disp.gas2 = clamp(state.disp.gas2 + (Math.random()*2-1)*0.3, 0, 100);
+
+      renderAll();
+    },300);
+
+    window.addEventListener('beforeunload', ()=>{ try{ clearInterval(timer); }catch{} });
+
+    // 顶栏返回
     ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
+
+    // 同步列表波浪线宽度
+    window.addEventListener('resize', ()=>{ try{ syncSparkWidth(); }catch{} });
+    new ResizeObserver(()=>{ try{ syncSparkWidth(); }catch{} }).observe(leftList);
   </script>
 </body>
 </html>
