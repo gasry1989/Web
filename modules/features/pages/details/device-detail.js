@@ -6,6 +6,8 @@ import { createModeDispTilt } from '../modes/ModeDispTilt.js';
 import { createModeAudio } from '../modes/ModeAudio.js';
 import { apiDeviceInfo } from '@api/deviceApi.js';
 import { authLoadToken } from '@core/auth.js';
+import { openEditDeviceInfoModal } from '../modals/EditDeviceInfoModal.js';
+import { openEditDeviceOwnerModal } from '../modals/EditDeviceOwnerModal.js';
 
 try { authLoadToken(); } catch {}
 
@@ -83,6 +85,26 @@ function mountPreview(cellId, url){
   cell.appendChild(vp);
   mountedPreviews.push(vp);
   vp.play(url).catch(err=>console.warn('[device-detail] preview play failed', cellId, err));
+}
+
+// 新增：每次刷新前清理已挂载的预览，避免重复叠加
+function destroyAllPreviews(){
+  try{
+    mountedPreviews.forEach(p=>{
+      try{ p.destroy && p.destroy(); }catch{}
+      try{ p.remove && p.remove(); }catch{}
+    });
+  }catch{}
+  mountedPreviews.length = 0;
+  // 只移除卡片内除 label 外的动态子节点
+  ['cellScreen','cellMain','cellSub'].forEach(id=>{
+    const cell = document.getElementById(id);
+    if (!cell) return;
+    Array.from(cell.children).forEach(ch=>{
+      if (ch.classList && ch.classList.contains('label')) return;
+      ch.remove();
+    });
+  });
 }
 
 /* ------------- 模式预览（占满剩余高度） + Mock ------------- */
@@ -171,15 +193,18 @@ startMock();
 function setCols(el, n){ if (el) el.style.setProperty('--cols', String(Math.max(0, n))); }
 function hide(el, flag){ if (!el) return; el.classList.toggle('hide', !!flag); }
 
+let currentDeviceInfo = null;
+
 async function loadDeviceInfoAndLayout(){
 if (!devId) return;
 try{
   const resp = await apiDeviceInfo(Number(devId));
   const d = (resp && resp.devInfo) ? resp.devInfo : {};
+  currentDeviceInfo = d;
 
   // 右侧信息
   document.getElementById('devIdLbl').textContent   = d.id ?? devId ?? '--';
-  document.getElementById('devNameLbl').textContent = d.no || d.name || '--';
+  document.getElementById('devNameLbl').textContent = d.name || d.no || '--';
   document.getElementById('devTypeLbl').textContent = d.typeName || '--';
 
   // 修复点：严格使用 modeList[].modeName，英文逗号拼接
@@ -194,6 +219,9 @@ try{
 
   document.getElementById('ownerIdLbl').textContent  = (d.parentUserId ?? d.ownerUserId ?? '--');
   document.getElementById('ownerAccLbl').textContent = (d.parentUserAccount ?? d.ownerUserAccount ?? '无');
+
+  // 先清理已有预览，避免重复叠加
+  destroyAllPreviews();
 
   // 视频能力
   const screenCount = Number(d?.hardwareInfo?.screenCount ?? 0);
@@ -240,6 +268,8 @@ try{
   }
 } catch (e) {
   console.warn('[device-detail] apiDeviceInfo failed; will still show defaults', e);
+  // 失败也先清理再尝试挂载默认预览，避免叠加
+  destroyAllPreviews();
   mountPreview('cellScreen', STREAMS.screen);
   mountPreview('cellMain', STREAMS.main);
   mountPreview('cellSub',  STREAMS.sub);
@@ -287,9 +317,17 @@ ui.btnTalk.onclick = ()=>{
 };
 ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
 
-// 编辑信息/属主：先打 LOG
-document.getElementById('btnEditInfo').onclick  = ()=> console.log('[device-detail] 编辑信息 click, devId=', devId);
-document.getElementById('btnEditOwner').onclick = ()=> console.log('[device-detail] 编辑属主 click, devId=', devId);
+// 编辑信息/属主：弹窗
+document.getElementById('btnEditInfo').onclick  = async ()=>{
+  const dev = currentDeviceInfo || { id: Number(devId), no: devNo || '', name: '', type: 0, modeList: [] };
+  const ok = await openEditDeviceInfoModal({ dev });
+  if (ok) await loadDeviceInfoAndLayout();
+};
+document.getElementById('btnEditOwner').onclick = async ()=>{
+  const dev = currentDeviceInfo || { id: Number(devId), no: devNo || '', name: '' };
+  const ok = await openEditDeviceOwnerModal({ dev });
+  if (ok) await loadDeviceInfoAndLayout();
+};
 
 bridge.onWsMessage((m)=>{ console.log('[device-detail] WS message:', m); });
 

@@ -21,7 +21,8 @@ export const API_CATALOG = {
   '3.17': '/api/web/dev/info',
   '3.20': '/api/web/dev/summary_list',
   '3.21': '/api/web/misc/online_list',
-  '3.24': '/api/web/user/delete'
+  '3.24': '/api/web/user/delete',
+  '3.18': '/api/web/dev/update_info'
 };
 
 export function apiPath(id) {

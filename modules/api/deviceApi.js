@@ -65,3 +65,11 @@ export function apiDeviceInfo(devId) {
 export function apiOnlineList() {
   return httpPost(apiPath('3.21'), {});
 }
+/**
+ * 3.18 修改设备信息/设备属主
+ * POST /api/web/dev/update_info
+ * 请求体：{ devInfo: { id, name?, type?, modeList?, parentUserId? } }
+ */
+export function apiDeviceUpdateInfo(devInfo) {
+  return httpPost(apiPath('3.18'), { devInfo });
+}
