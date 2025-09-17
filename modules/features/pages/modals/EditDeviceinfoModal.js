@@ -204,5 +204,5 @@ export function openEditDeviceInfoModal({ dev }) {
         btnOk.disabled = false;
       }
     });
-  });
+  }); 
 }
