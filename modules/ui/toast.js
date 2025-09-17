@@ -19,10 +19,19 @@ const active = new Map();          // id -> { el, timer }
 const recent = [];                 // { h, t }
 
 function ensureContainer() {
-  if (container) return;
-  container = document.createElement('div');
-  container.id = 'globalToastContainer';
-  document.body.appendChild(container);
+  // 创建容器
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'globalToastContainer';
+    document.body.appendChild(container);
+  }
+  // 关键：保证 toast 永远浮在 overlay 之上（overlay 使用 ~2147483645）
+  try {
+    const current = Number(getComputedStyle(container).zIndex) || 0;
+    if (current < 2147483646) {
+      container.style.zIndex = '2147483647';
+    }
+  } catch {}
 }
 
 function pruneRecent() {
