@@ -213,8 +213,8 @@ export function createTreePanel() {
     const devType = Number((tSel && tSel.value) || '0');
     const devMode = Number((mSel && mSel.value) || '0');
     const searchStr = (sInp && sInp.value ? sInp.value.trim() : '');
-    const onlyOnline = !!(cChk && cChk.checked);
-    return { devType, devMode, searchStr, onlyOnline };
+    const filterOnline = !!(cChk && cChk.checked);
+    return { devType, devMode, searchStr, filterOnline };
   }
 
   const controls = {

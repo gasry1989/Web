@@ -230,16 +230,41 @@ function saveCollapsed(v){ try{ localStorage.setItem(KEY_TREE_COLLAPSED, v?'1':'
 
 /* ---------------- 数据装配（同步 filters 到 siteState） ---------------- */
 async function bootstrapData(summaryEl, notifyEl) {
+  // 1) 并发请求基础数据，但不因单个失败而中断
+  const [typesRes, modesRes, onlineRes, summaryRes] = await Promise.allSettled([
+    apiDevTypes(),
+    apiDevModes(),
+    apiOnlineList(),
+    apiDeviceSummary()
+  ]);
+
+  if (typesRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiDevTypes failed:', typesRes.reason && (typesRes.reason.message || typesRes.reason));
+  if (modesRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiDevModes failed:', modesRes.reason && (modesRes.reason.message || modesRes.reason));
+  if (onlineRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiOnlineList failed:', onlineRes.reason && (onlineRes.reason.message || onlineRes.reason));
+  if (summaryRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiDeviceSummary failed:', summaryRes.reason && (summaryRes.reason.message || summaryRes.reason));
+
+  const types   = typesRes.status   === 'fulfilled' ? (typesRes.value || {})   : {};
+  const modes   = modesRes.status   === 'fulfilled' ? (modesRes.value || {})   : {};
+  const online  = onlineRes.status  === 'fulfilled' ? (onlineRes.value || {})  : { list: [] };
+  const summary = summaryRes.status === 'fulfilled' ? (summaryRes.value || {}) : { stateList: [] };
+
+  // 2) 同步当前筛选条件
+  let filters = {};
+  try { filters = getFiltersFromTree(); siteState.set({ filters: filters }); } catch (e) { console.warn('[Site][bootstrap] read/set filters failed', e); }
+
+  // 3) 拉取树数据（同样容错）
+  const [groupedRes, ungroupedRes] = await Promise.allSettled([
+    apiGroupedDevices(filters),
+    apiUngroupedDevices(filters)
+  ]);
+  if (groupedRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiGroupedDevices failed:', groupedRes.reason && (groupedRes.reason.message || groupedRes.reason));
+  if (ungroupedRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiUngroupedDevices failed:', ungroupedRes.reason && (ungroupedRes.reason.message || ungroupedRes.reason));
+
+  const grouped   = groupedRes.status   === 'fulfilled' ? (groupedRes.value || { devList: [] })   : { devList: [] };
+  const ungrouped = ungroupedRes.status === 'fulfilled' ? (ungroupedRes.value || { devList: [] }) : { devList: [] };
+
+  // 4) 渲染树与地图（尽力而为）
   try {
-    const arr = await Promise.all([ apiDevTypes(), apiDevModes(), apiOnlineList(), apiDeviceSummary() ]);
-    const types = arr[0], modes = arr[1], online = arr[2], summary = arr[3];
-
-    const filters = getFiltersFromTree();
-    try { siteState.set({ filters: filters }); } catch (e) {}
-
-    const gu = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
-    const grouped = gu[0], ungrouped = gu[1];
-
     tree.setData({
       groupedDevices: grouped.devList || [],
       ungroupedDevices: ungrouped.devList || [],
@@ -247,37 +272,48 @@ async function bootstrapData(summaryEl, notifyEl) {
       devTypes: (types.devTypeList || []),
       devModes: (modes.devModeList || [])
     });
+  } catch (e) { console.warn('[Site][bootstrap] tree.setData failed', e); }
 
+  try {
     const all = [].concat(grouped.devList || [], ungrouped.devList || []);
     mapView.setMarkers(all);
+  } catch (e) { console.warn('[Site][bootstrap] mapView.setMarkers failed', e); }
 
-    renderSummary(summaryEl, summary);
-    renderNotify(notifyEl, (online.list || []).slice(0,50));
-  } catch (e) {
-    console.error('[Site] bootstrapData error', e);
-  }
+  // 5) 摘要与通知
+  try { renderSummary(summaryEl, summary); } catch (e) { console.warn('[Site][bootstrap] renderSummary failed', e); }
+  try { renderNotify(notifyEl, (online.list || []).slice(0,50)); } catch (e) { console.warn('[Site][bootstrap] renderNotify failed', e); }
 }
 
 // 根据当前树筛选刷新树与地图
 async function reloadByFilters() {
+  // 1) 取筛选条件（容错）
+  let filters = {};
+  try { filters = getFiltersFromTree(); siteState.set({ filters: filters }); } catch (e) { console.warn('[Site][reload] read/set filters failed', e); }
+
+  // 2) 拉取数据（容错、不阻断）
+  const [groupedRes, ungroupedRes] = await Promise.allSettled([
+    apiGroupedDevices(filters),
+    apiUngroupedDevices(filters)
+  ]);
+  if (groupedRes.status !== 'fulfilled') console.warn('[Site][reload] apiGroupedDevices failed:', groupedRes.reason && (groupedRes.reason.message || groupedRes.reason));
+  if (ungroupedRes.status !== 'fulfilled') console.warn('[Site][reload] apiUngroupedDevices failed:', ungroupedRes.reason && (ungroupedRes.reason.message || ungroupedRes.reason));
+
+  const grouped   = groupedRes.status   === 'fulfilled' ? (groupedRes.value || { devList: [] })   : { devList: [] };
+  const ungrouped = ungroupedRes.status === 'fulfilled' ? (ungroupedRes.value || { devList: [] }) : { devList: [] };
+
+  // 3) 渲染树与地图（尽力而为）
   try {
-    const filters = getFiltersFromTree();
-    try { siteState.set({ filters: filters }); } catch (e) {}
-
-    const gu = await Promise.all([ apiGroupedDevices(filters), apiUngroupedDevices(filters) ]);
-    const grouped = gu[0], ungrouped = gu[1];
-
     tree.setData({
       groupedDevices: grouped.devList || [],
       ungroupedDevices: ungrouped.devList || [],
       expandLevel: 2
     });
+  } catch (e) { console.warn('[Site][reload] tree.setData failed', e); }
 
+  try {
     const all = [].concat(grouped.devList || [], ungrouped.devList || []);
     mapView.setMarkers(all);
-  } catch (e) {
-    console.error('[Site] reloadByFilters error', e);
-  }
+  } catch (e) { console.warn('[Site][reload] mapView.setMarkers failed', e); }
 }
 
 function renderSummary(el, summary) {
