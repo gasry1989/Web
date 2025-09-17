@@ -46,7 +46,9 @@ export function createTreePanel() {
     const treeEl = root.getElementById('tree');
     if (!treeEl) return;
 
-    const { onlyOnline } = getFilterValues();
+    // 修正：getFilterValues 返回的是 filterOnline
+    const { filterOnline } = getFilterValues();
+    const onlyOnline = filterOnline;
 
     const roots = buildForest(state.groupedDevices);
     const expandLevel = state.expandLevel || 2;
@@ -82,35 +84,87 @@ export function createTreePanel() {
       userId: ui.userId ?? ui.id,
       userName: ui.userName ?? ui.name ?? '',
       parentUserId: ui.parentUserId ?? ui.pid ?? null,
+      parentUserName: ui.parentUserName ?? '',
+      rootUserName: ui.rootUserName ?? '',
       onlineState: typeof ui.onlineState === 'boolean' ? ui.onlineState : undefined
     };
   }
+
   function buildForest(grouped) {
     const map = new Map();
+
+    // 1) 先为每个“出现过的 userId”建节点
     grouped.forEach(e => {
       const ui = normalizeUserInfo(e.userInfo);
       if (!ui || ui.userId == null) return;
-      if (!map.has(ui.userId)) map.set(ui.userId, { ...ui, children: [], deviceChildren: [], isOnline: ui.onlineState });
+      if (!map.has(ui.userId)) {
+        map.set(ui.userId, {
+          userId: ui.userId,
+          userName: ui.userName,
+          parentUserId: ui.parentUserId,
+          children: [],
+          deviceChildren: [],
+          isOnline: ui.onlineState
+        });
+      }
     });
-    grouped.forEach(e => {
-      const ui = normalizeUserInfo(e.userInfo); const di = e.devInfo || {};
-      if (!ui || ui.userId == null) return;
-      const node = map.get(ui.userId); if (!node) return;
-      node.deviceChildren.push({ devId: di.id, devName: di.no || di.name || String(di.id || ''), onlineState: !!di.onlineState, raw: di });
-    });
-    map.forEach(n => { n.children = n.children || []; });
-    map.forEach(n => { const pid = n.parentUserId; if (pid != null && map.has(pid)) map.get(pid).children.push(n); });
 
+    // 2) 为“缺失的父账号”创建占位父节点（父账号自己可能没有设备）
+    grouped.forEach(e => {
+      const ui = normalizeUserInfo(e.userInfo);
+      if (!ui) return;
+      const pid = ui.parentUserId;
+      if (pid != null && !map.has(pid)) {
+        map.set(pid, {
+          userId: pid,
+          userName: ui.parentUserName || ui.rootUserName || String(pid),
+          parentUserId: null, // 无更上层信息，置空
+          children: [],
+          deviceChildren: [],
+          isOnline: undefined
+        });
+      }
+    });
+
+    // 3) 设备挂载到其所属用户节点
+    grouped.forEach(e => {
+      const ui = normalizeUserInfo(e.userInfo);
+      const di = e.devInfo || {};
+      if (!ui || ui.userId == null) return;
+      const node = map.get(ui.userId);
+      if (!node) return;
+      node.deviceChildren.push({
+        devId: di.id,
+        devName: di.no || di.name || String(di.id || ''),
+        onlineState: !!di.onlineState,
+        raw: di
+      });
+    });
+
+    // 4) 父子挂接
+    map.forEach(n => { n.children = n.children || []; });
+    map.forEach(n => {
+      const pid = n.parentUserId;
+      if (pid != null && map.has(pid)) {
+        map.get(pid).children.push(n);
+      }
+    });
+
+    // 5) 在线态向上聚合
     function calc(n) {
       if (typeof n.isOnline === 'boolean') return n.isOnline;
       let on = n.deviceChildren?.some(d => d.onlineState) || false;
       if (n.children?.length) for (const c of n.children) on = calc(c) || on;
-      n.isOnline = on; return on;
+      n.isOnline = on;
+      return on;
     }
     map.forEach(calc);
 
+    // 6) 根：无父 或 父不存在于 map（理论上经过步骤2基本都存在）
     const roots = [];
-    map.forEach(n => { if (n.parentUserId == null || !map.has(n.parentUserId)) roots.push(n); });
+    map.forEach(n => {
+      if (n.parentUserId == null || !map.has(n.parentUserId)) roots.push(n);
+    });
     return roots;
   }
 
