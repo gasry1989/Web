@@ -29,8 +29,11 @@
       var map=null,markers=[],infoWindow=null, geocoder=null, mounted=false;
       var infoFrame=null, infoWindowOpen=false;
       var currentDevInfo=null;
-      var lastInfoPos=null; // { lng, lat } 缓存为数值
-      var openedDevIds = Object.create(null);
+      var lastInfoPos=null; // { lng, lat }
+
+      // 稳定显示：第一次用户指针进入地图时做一次强制锚定；若用户不动鼠标，定时兜底
+      var firstPointerIn = false;
+      var showAfterStableTimer = null;
 
       function ensureAMap(cb){
         if(!AMAP_KEY){ post({t:"error",message:"缺少高德 Key（AMAP_KEY）"}); return; }
@@ -64,6 +67,23 @@
           map.on && map.on("dragstart", clearSel, { passive:true });
           map.on && map.on("zoomstart", clearSel, { passive:true });
           document.addEventListener("mouseup", clearSel, true);
+
+          // 监听“第一次”指针进入/移动，用于首帧强制锚定 + 淡入
+          var container = document.getElementById('map');
+          if (container) {
+            container.addEventListener('mouseenter', function onceEnter(){
+              if (firstPointerIn) return;
+              firstPointerIn = true;
+              container.removeEventListener('mouseenter', onceEnter);
+              tryStabilizeAndShow('mouseenter');
+            }, { passive:true });
+          }
+          map.on && map.on('mousemove', function onceMove(){
+            if (firstPointerIn) return;
+            firstPointerIn = true;
+            try { map.off && map.off('mousemove', onceMove); } catch(e){}
+            tryStabilizeAndShow('mousemove');
+          }, { passive:true });
         }catch(e){
           warn("init error",e); post({t:"error",message:"地图初始化失败"});
         }
@@ -107,7 +127,7 @@
           isCustom:true,
           offset:new AMap.Pixel(0,-20),
           closeWhenClickMap:false,
-          autoMove:false  // 关键：关闭自动平移，避免“位置被带走”
+          autoMove:false
         });
         if (!infoFrame) {
           var ifr=document.createElement('iframe');
@@ -117,6 +137,8 @@
             setTimeout(function(){ lockWidth(ifr); }, 0);
             setTimeout(function(){ lockWidth(ifr); }, 60);
           });
+          // 初次内容未稳定前先透明，稳定后再显示
+          try { ifr.style.opacity='0'; ifr.style.transition='opacity .12s ease-out'; } catch(e){}
           infoFrame = ifr;
           infoWindow.setContent(infoFrame);
         }
@@ -142,8 +164,25 @@
         return [ lastInfoPos.lng, lastInfoPos.lat ];
       }
 
-      // 打开/更新信息窗
-      function openDevice(devInfo, followCenterWhenNoLocation){
+      // 强制锚定 + 显示（淡入）
+      function tryStabilizeAndShow(reason){
+        if (!infoWindowOpen || !infoWindow) return;
+        try {
+          var p = infoWindow.getPosition && infoWindow.getPosition();
+          if (p && p.lng!=null && p.lat!=null) {
+            infoWindow.setPosition([Number(p.lng), Number(p.lat)]);
+          } else {
+            var def = defaultPosArray();
+            infoWindow.setPosition(def);
+          }
+          if (infoFrame && infoFrame.style) infoFrame.style.opacity = '1';
+          if (showAfterStableTimer) { try{ clearTimeout(showAfterStableTimer); }catch(e){} showAfterStableTimer=null; }
+          log('[ov] stabilize+show by', reason);
+        } catch (e) {}
+      }
+
+      // 打开/更新信息窗：始终“立即 open”，保证必然可见；之后做稳定锚定与淡入
+      function openDevice(devInfo){
         if(!mounted) return;
         currentDevInfo = devInfo || {};
         var hasLL = !!(currentDevInfo && currentDevInfo.lastLocation && currentDevInfo.lastLocation.lng!=null && currentDevInfo.lastLocation.lat!=null);
@@ -151,23 +190,32 @@
 
         ensureInfoContent();
 
+        // 每次新 open/update 前先透明，等稳定后再显示
+        if (infoFrame && infoFrame.style) infoFrame.style.opacity = '0';
+
+        var openAt = ll || defaultPosArray();
         if (!infoWindowOpen) {
-          // 初次：有经纬度 -> 在经纬度打开；无经纬度 -> 在默认数值坐标打开
-          var openAt = ll || defaultPosArray();
           try { infoWindow.open(map, openAt); infoWindowOpen = true; } catch(e){}
+          try{
+            var p = infoWindow.getPosition && infoWindow.getPosition();
+            if (p) lastInfoPos = { lng:Number(p.lng), lat:Number(p.lat) };
+          }catch(e){}
+          // 如果用户未移动鼠标，兜底定时强制锚定 + 显示
+          if (!firstPointerIn) {
+            if (showAfterStableTimer) try{ clearTimeout(showAfterStableTimer); }catch(e){}
+            showAfterStableTimer = setTimeout(function(){ tryStabilizeAndShow('open-timer'); }, 500);
+          }
+          // 首帧也尝试一次
+          try { requestAnimationFrame(function(){ tryStabilizeAndShow('raf-open'); }); }catch(e){}
         } else {
-          // 已打开：有经纬度就移动；无经纬度不移动（autoMove=false，不会自动平移）
+          // 已打开：有经纬度就移动；无经纬度不移动
           if (ll) { try { infoWindow.setPosition(ll); } catch(e){} }
+          // 立即尝试一次稳定 + 显示
+          tryStabilizeAndShow('update-existing');
         }
 
-        // 回写 lastInfoPos（以实际显示位置为准）
-        try{
-          var p = infoWindow.getPosition && infoWindow.getPosition();
-          if (p) lastInfoPos = { lng: Number(p.lng), lat: Number(p.lat) };
-        }catch(e){}
-
+        // 把数据发给子页（子页高度变化后也会触发一次稳定显示）
         sendDataToChild();
-        log("update infoWindow", {devId: String(currentDevInfo && currentDevInfo.id), opened:infoWindowOpen, hasLL:hasLL, pos: ll, lastInfoPos:lastInfoPos });
       }
 
       function setCenter(lng,lat){ try{ map&&map.setCenter([lng,lat]); }catch(e){} }
@@ -184,6 +232,8 @@
               if (infoFrame) {
                 try{ infoFrame.style.height = Math.max(10, Number(msg.h||0)) + 'px'; }catch(e){}
               }
+              // 子页高度就绪后再稳定一次
+              tryStabilizeAndShow('height');
               break;
             case 'close':
               try{ infoWindow && infoWindow.close(); infoWindowOpen=false; }catch(e){}
@@ -227,7 +277,7 @@
             ensureAMap(init);
             break;
           case "setMarkers": setMarkers(msg.list||[]); break;
-          case "openDevice": openDevice(msg.devInfo||{}, !!msg.followCenterWhenNoLocation); break;
+          case "openDevice": openDevice(msg.devInfo||{}); break;
           case "setCenter": setCenter(msg.lng, msg.lat); break;
           case "resize": resize(); break;
         }
