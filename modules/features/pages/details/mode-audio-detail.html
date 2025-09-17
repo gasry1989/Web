@@ -4,66 +4,277 @@
   <meta charset="utf-8"/>
   <title>音频模式详情</title>
   <style>
-    html,body{height:100%;margin:0;background:#000;color:#e6f0ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
+    html,body{height:100%;margin:0;background:#000;color:#e6f0ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;overflow:hidden;}
     *{box-sizing:border-box;}
-    .wrap{position:absolute; inset:48px 0 0 0; color:#e6f0ff; overflow:hidden;}
-    .chart{ position:absolute; inset:48px 0 100px 0; }
+
+    /* 整页不允许出现任何滚动条 */
+    .wrap{
+      position:absolute; inset:48px 0 0 0; background:#000; color:#e6f0ff;
+      overflow:hidden; /* 禁止横纵向滚动 */
+      --btm-h: 120px;  /* 底部栏高度 */
+    }
+
+    /* 上方柱状图区域：填满除底部栏以外的空间 */
+    .chart{ position:absolute; left:0; top:0; right:0; bottom:var(--btm-h); }
     canvas{ width:100%; height:100%; display:block; background:#000; }
-    .bottomBar{ position:absolute; left:0; right:0; bottom:0; height:100px; background:#0b0f14; display:flex; align-items:center; justify-content:space-around; border-top:1px solid #1f2a3a; overflow-x:auto; }
-    .slot{ width:120px; text-align:center; color:#fff; flex:0 0 auto; }
-    .wifi::before{ content:''; display:block; margin:0 auto 6px; width:18px; height:14px; background:
-      radial-gradient(circle at 4px 14px,#fff 2px,transparent 3px),
-      radial-gradient(circle at 9px 9px, #fff 2px, transparent 3px),
-      radial-gradient(circle at 14px 4px,#fff 2px,transparent 3px); }
-    .batt{ position:relative; width:36px; height:14px; border:2px solid #9f9; border-radius:2px; display:inline-block; vertical-align:middle;}
+
+    /* 底部探头栏：固定12等份，不滚动 */
+    .bottomBar{
+      position:absolute; left:0; right:0; bottom:0; height:var(--btm-h);
+      background:#0b0f14; border-top:1px solid #1f2a3a;
+      display:grid; grid-template-columns:repeat(12, 1fr); align-items:center;
+      overflow:hidden; /* 禁止滚动 */
+      padding:8px 10px;
+    }
+    .slot{
+      height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:6px; min-width:0; user-select:none;
+    }
+
+    /* 顶部一行：WiFi + 电量（仅显示，不可点击） */
+    .iconLine{ display:flex; align-items:center; gap:8px; }
+    .wifi{ width:22px; height:16px; position:relative; filter:grayscale(0); opacity:.95; }
+    .wifi::before,.wifi::after{
+      content:''; position:absolute; left:0; right:0; margin:auto;
+      border:2px solid #fff; border-top:none; border-left:none; border-bottom-right-radius:18px;
+      transform:rotate(45deg);
+    }
+    .wifi::before{ width:18px; height:18px; top:-2px; opacity:.35; }
+    .wifi::after{ width:12px; height:12px; top:3px; }
+    .wifi.w0::after{ opacity:.15; } .wifi.w0::before{ opacity:.1; }
+    .wifi.w1::after{ opacity:.35; } .wifi.w1::before{ opacity:.15; }
+    .wifi.w2::after{ opacity:.65; } .wifi.w2::before{ opacity:.35; }
+    .wifi.w3::after{ opacity:1;   } .wifi.w3::before{ opacity:.6; }
+
+    .batt{ position:relative; width:40px; height:14px; border:2px solid #9f9; border-radius:2px; display:inline-block; vertical-align:middle;}
     .batt::after{ content:''; position:absolute; right:-5px; top:3px; width:3px; height:8px; background:#9f9; }
-    .batt .fill{ position:absolute; left:0; top:0; bottom:0; width:70%; background:#27e65e;}
+    .batt .fill{ position:absolute; left:0; top:0; bottom:0; width:60%; background:#27e65e;}
+    .batt.low{ border-color:#ff6b6b; }
+    .batt.low::after{ background:#ff6b6b; }
+    .batt.low .fill{ background:#ff4040; }
+
+    /* 第二行：左耳/编号/右耳（三个等分，左右可点击） */
+    .ears{ display:grid; grid-template-columns:1fr auto 1fr; align-items:end; gap:6px; }
+    .ear{
+      width:28px; height:18px; position:relative; cursor:pointer; filter:drop-shadow(0 0 0 rgba(0,0,0,0));
+    }
+    /* 用纯CSS勾勒耳机半弧+耳罩；右耳镜像 */
+    .ear::before{ content:''; position:absolute; inset:0; border-top:3px solid #cfe3ff; border-left:3px solid #cfe3ff; border-right:none; border-bottom:none; border-top-left-radius:18px; }
+    .ear::after{ content:''; position:absolute; right:-2px; bottom:-1px; width:10px; height:8px; background:#cfe3ff; border-radius:2px; }
+    .ear.right{ transform:scaleX(-1); }
+    .ear:active{ transform:scaleX(var(--sx,1)) scale(.96); }
+    .ear.right{ --sx:-1; }
+
+    .slotNo{ font-weight:800; color:#e6f0ff; min-width:1.5em; text-align:center; font-size:14px; opacity:.9; }
+
+    /* 空槽位（无探头）显示为弱化状态，耳机不可点击 */
+    .slot.empty .iconLine{ opacity:.25; }
+    .slot.empty .ear{ opacity:.15; pointer-events:none; }
+    .slot.empty .slotNo{ opacity:.35; }
   </style>
 </head>
 <body>
   <script type="module">
     import { mountTopbar, detailBridge } from './common/detail-common.js';
+
+    // 读取 devId/devNo；若未给，等待父页 init 下发
     const qs = new URLSearchParams(location.search);
-    const devId = qs.get('devId')||''; const devNo = qs.get('devNo')||'';
-    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNo || devId;
+    let devId = qs.get('devId') || '';
+    let devNo = qs.get('devNo') || '';
+    const ui = mountTopbar(document.body); ui.lblDevNo.textContent = devNo || devId || '--';
+
     const bridge = detailBridge(); bridge.ready({ page:'mode-audio', devId, devNo });
 
+    if (!devId) {
+      try {
+        const init = await bridge.waitInit();
+        devId = String(init?.devId || devId || '');
+        devNo = String(init?.devNo || devNo || '');
+        ui.lblDevNo.textContent = devNo || devId || '--';
+      } catch (e) {}
+    }
+
+    // 布局
     const wrap = document.createElement('div'); wrap.className='wrap';
-    wrap.innerHTML = `<div class="chart"><canvas id="cv"></canvas></div><div class="bottomBar" id="btm"></div>`;
+    wrap.innerHTML = `
+      <div class="chart"><canvas id="cv"></canvas></div>
+      <div class="bottomBar" id="btm"></div>
+    `;
     document.body.appendChild(wrap);
 
-    const cv = document.getElementById('cv'); const ctx = cv.getContext('2d');
-    function draw(vals=[100,0,100,0,60,0,100,0]){
-      const dpr = devicePixelRatio || 1;
-      const w = cv.clientWidth, h = cv.clientHeight;
-      cv.width = Math.floor(w * dpr); cv.height = Math.floor(h * dpr);
-      ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
-      ctx.fillStyle = '#111'; ctx.fillRect(0,0,w,h);
-      ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
-      for(let i=0;i<5;i++){ const y = h - (i*(h/5)); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
-      const n = vals.length; const spacing = w/(n*2);
-      vals.forEach((v,i)=>{
-        const x = spacing + i*2*spacing; const bw = spacing*1.4; const bh = (v/100)* (h*0.9);
-        ctx.fillStyle='#fff'; ctx.fillRect(x - bw/2, h - bh, bw, bh);
-        ctx.font='18px system-ui'; ctx.textAlign='center'; ctx.fillText(String(v), x, Math.max(20, h - bh - 6));
-      });
+    // WS 通道（复用父页桥）
+    let ch = null;
+    try {
+      ch = await bridge.wsOpen({ kind:'mode', devId, modeId:3 });
+      console.log('[audio-detail] ws opened', { ch, devId });
+    } catch (e) { console.warn('[audio-detail] ws open failed', e); }
+
+    function send(cmd, data){
+      const payload = { cmd, to:{ type:1, id: devId }, data };
+      console.log('[audio-detail] click send', payload);
+      if (ch) bridge.wsSend(ch, payload);
     }
-    new ResizeObserver(()=>draw()).observe(cv); setTimeout(()=>draw(),0);
 
+    // 画布
+    const cv = document.getElementById('cv'); const ctx = cv.getContext('2d');
+    function drawBars(values, totalSlots=12){
+      const dpr = window.devicePixelRatio || 1;
+      const w = cv.clientWidth, h = cv.clientHeight;
+      cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.max(1, Math.floor(h * dpr));
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      ctx.clearRect(0,0,w,h);
+
+      // 背景与横线
+      ctx.fillStyle = '#000'; ctx.fillRect(0,0,w,h);
+      ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1;
+      for (let i=0;i<=5;i++){
+        const y = h - Math.round(i * (h/5));
+        ctx.beginPath(); ctx.moveTo(0,y+.5); ctx.lineTo(w,y+.5); ctx.stroke();
+        if (i<5) {
+          const text = String(i*20);
+          ctx.fillStyle = '#cfd8dc'; ctx.font = '16px system-ui,Segoe UI,Roboto';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          ctx.fillText(text, 6, y - 2);
+        }
+      }
+
+      // 12 等分位置
+      const colW = w / totalSlots;
+      const bw = Math.min(40, Math.max(18, colW * 0.36)); // 柱宽随列宽而变
+      values = values.slice(0,totalSlots);
+      for (let i=0;i<totalSlots;i++){
+        const v = Number(values[i] ?? 0);
+        const x = Math.round(i * colW + colW/2);
+        const bh = Math.max(0, Math.min(1, v/100)) * (h * 0.90);
+        // 柱
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(Math.round(x - bw/2), Math.round(h - bh), Math.round(bw), Math.round(bh));
+        // 顶部数值
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '18px system-ui,Segoe UI,Roboto';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText(String(Math.round(v)), x, Math.max(20, h - bh - 6));
+      }
+    }
+    new ResizeObserver(()=>{ drawBars(state.values, 12); }).observe(cv);
+
+    // 底部探头栏
     const btm = document.getElementById('btm');
-    btm.innerHTML = [1,2,5,7,8].map(n=>`
-      <div class="slot">
-        <div class="wifi"></div>
-        <div class="batt"><div class="fill" style="width:${80-Math.random()*40}%"></div></div>
-        <div style="margin-top:6px;">${n}</div>
-      </div>
-    `).join('');
 
-    // WS：打开并请求模式数据（确保连接复用）
-    const ch = await bridge.wsOpen({ kind:'mode', devId, modeId: 3 });
-    bridge.wsSend(ch, { cmd:'modeData', to:{type:1,id:devId}, data:{ modeId: 300 } });
-    bridge.onWsMessage((m)=>{ if (m.cmd==='modeDataResponse' && m.code===0) { /* 渲染音频值 */ } });
+    // 状态与模拟
+    const state = {
+      // 探头列表 0~12
+      probes: [], // { no, wifi(0-3), batt(0-100), val(0-100) }
+      values: Array(12).fill(0) // 用于画布的 12 槽
+    };
 
+    function genProbes(){
+      const n = Math.floor(Math.random()*13); // 0..12
+      const arr = [];
+      for (let i=0;i<n;i++){
+        arr.push({
+          no: i+1,
+          wifi: Math.floor(Math.random()*4), // 0..3
+          batt: Math.floor(30 + Math.random()*70), // 30..100
+          val: Math.floor(Math.random()*101)
+        });
+      }
+      state.probes = arr;
+      syncValues();
+    }
+    function syncValues(){
+      state.values = Array.from({length:12}, (_,i)=> (state.probes[i]?.val ?? 0));
+      drawBars(state.values, 12);
+      renderBottom();
+    }
+
+    function renderBottom(){
+      const html = Array.from({length:12}, (_,i)=>{
+        const p = state.probes[i] || null;
+        const wifiCls = 'wifi ' + (p ? ('w'+Math.max(0,Math.min(3,p.wifi))) : 'w0');
+        const batt = Math.max(0, Math.min(100, p ? p.batt : 0));
+        const low = batt <= 15;
+        const ears = `
+          <div class="ears">
+            <div class="ear left"  ${p ? `data-act="earL" data-idx="${i}"` : ''} title="左耳机"></div>
+            <div class="slotNo">${p ? p.no : ''}</div>
+            <div class="ear right" ${p ? `data-act="earR" data-idx="${i}"` : ''} title="右耳机"></div>
+          </div>`;
+        return `
+          <div class="slot ${p?'':'empty'}">
+            <div class="iconLine">
+              <div class="${wifiCls}"></div>
+              <div class="batt ${low?'low':''}"><div class="fill" style="width:${batt}%;"></div></div>
+            </div>
+            ${ears}
+          </div>`;
+      }).join('');
+      btm.innerHTML = html;
+    }
+
+    // 事件：耳机点击 -> WS
+    btm.addEventListener('click', (e)=>{
+      const t = e.target.closest('[data-act]');
+      if (!t) return;
+      const act = t.getAttribute('data-act');
+      const idx = Number(t.getAttribute('data-idx'));
+      const p = state.probes[idx];
+      if (!p) return;
+      if (act === 'earL'){
+        console.log('[audio-detail] click left ear', { devId, idx, no:p.no });
+        send('audio:left', { index: idx, no: p.no });
+      } else if (act === 'earR'){
+        console.log('[audio-detail] click right ear', { devId, idx, no:p.no });
+        send('audio:right', { index: idx, no: p.no });
+      }
+    });
+
+    // WS 下行（如需）：接受模式数据
+    bridge.onWsMessage((m)=>{
+      if (!m) return;
+      // 预留：后端可推送 { cmd:'audio:update', data:{ list:[{ no,wifi,batt,val }, ...] } }
+      try{
+        if (m.cmd === 'audio:update' && m.data && Array.isArray(m.data.list)) {
+          const list = m.data.list.slice(0,12);
+          state.probes = list.map((x,i)=>({
+            no: x.no ?? (i+1),
+            wifi: Math.max(0,Math.min(3, Number(x.wifi)||0)),
+            batt: Math.max(0,Math.min(100, Number(x.batt)||0)),
+            val:  Math.max(0,Math.min(100, Number(x.val)||0))
+          }));
+          syncValues();
+        }
+      }catch(err){ console.warn('[audio-detail] parse message error', err); }
+    });
+
+    // 初次渲染
+    genProbes(); syncValues();
+
+    // 模拟：每 300ms 小幅抖动 + 偶尔变更探头数量
+    const t = setInterval(()=>{
+      // 10% 概率调整数量（0~12）
+      if (Math.random() < 0.10) {
+        const n = Math.floor(Math.random()*13);
+        if (n > state.probes.length) {
+          for (let i=state.probes.length; i<n; i++){
+            state.probes.push({ no:i+1, wifi:Math.floor(Math.random()*4), batt: Math.floor(30+Math.random()*70), val:Math.floor(Math.random()*101) });
+          }
+        } else {
+          state.probes = state.probes.slice(0,n);
+        }
+      }
+      // 数值抖动
+      state.probes.forEach(p=>{
+        p.val = Math.max(0, Math.min(100, p.val + Math.floor(Math.random()*21 - 10))); // ±10
+        if (Math.random() < 0.05) p.batt = Math.max(0, Math.min(100, p.batt + Math.floor(Math.random()*7 - 3))); // ±3
+        if (Math.random() < 0.10) p.wifi = Math.max(0, Math.min(3, p.wifi + (Math.random()<0.5?-1:1)));
+      });
+      syncValues();
+    }, 300);
+
+    window.addEventListener('beforeunload', ()=>{ try{ clearInterval(t); }catch{} });
+
+    // 返回按钮
     ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
   </script>
 </body>
