@@ -65,7 +65,8 @@ export function createTreePanel() {
         <div class="list">
           ${ungrouped.map(e => {
             const d = e.devInfo || {};
-            const name = d.no || d.name || String(d.id || '');
+            // 改为显示设备名称优先
+            const name = d.name || d.no || String(d.id || '');
             const cls = d.onlineState ? 'is-online' : 'is-offline';
             return `<div class="chip ${cls}" data-devid="${d.id}" title="${escapeHTML(name)}">
               <span class="ic-dev"></span><span class="title">${escapeHTML(name)}</span>
@@ -135,7 +136,8 @@ export function createTreePanel() {
       if (!node) return;
       node.deviceChildren.push({
         devId: di.id,
-        devName: di.no || di.name || String(di.id || ''),
+        // 改为显示设备名称优先
+        devName: di.name || di.no || String(di.id || ''),
         onlineState: !!di.onlineState,
         raw: di
       });
@@ -160,7 +162,7 @@ export function createTreePanel() {
     }
     map.forEach(calc);
 
-    // 6) 根：无父 或 父不存在于 map（理论上经过步骤2基本都存在）
+    // 6) 根：无父 或 父不存在于 map
     const roots = [];
     map.forEach(n => {
       if (n.parentUserId == null || !map.has(n.parentUserId)) roots.push(n);
