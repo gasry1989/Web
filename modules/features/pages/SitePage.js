@@ -37,7 +37,8 @@ let tree = null;
 let mapView = null;
 
 // 网格 6 格（带 devNo 以便详情用）
-const mediaSlots = Array.from({ length: 6 }, function(_, i){ return { idx:i, type:null, inst:null, devId:null, devNo:null, modeId:null }; });
+// 新增: stream 字段（'main' | 'sub' | string），仅对 video 有效
+const mediaSlots = Array.from({ length: 6 }, function(_, i){ return { idx:i, type:null, inst:null, devId:null, devNo:null, modeId:null, stream:null }; });
 
 // MOCK 状态
 const mockState = new Map();
@@ -123,7 +124,8 @@ export function mountSitePage() {
       mapView.mount();
 
       // 打开视频/模式/刷新/标注点击/详情
-      mapView.addEventListener('openVideo', function(e){ openVideoInSlot(e.detail.devId, e.detail.devNo); });
+      // 新增: openVideo 事件如果带 stream，则传入；默认 'main'
+      mapView.addEventListener('openVideo', function(e){ openVideoInSlot(e.detail.devId, e.detail.devNo, e.detail.stream || 'main'); });
       mapView.addEventListener('openMode',  function(e){ openModeInSlot(e.detail.devId, e.detail.devNo, e.detail.modeId); });
       mapView.addEventListener('refreshDevice', async function(e){
         try{
@@ -160,7 +162,7 @@ export function mountSitePage() {
 
       // 初始化网格状态
       for (let i=0;i<mediaSlots.length;i++) {
-        mediaSlots[i].type = null; mediaSlots[i].inst = null; mediaSlots[i].devId=null; mediaSlots[i].devNo=null; mediaSlots[i].modeId=null;
+        mediaSlots[i].type = null; mediaSlots[i].inst = null; mediaSlots[i].devId=null; mediaSlots[i].devNo=null; mediaSlots[i].modeId=null; mediaSlots[i].stream=null;
         const body = document.getElementById('mediaBody'+i);
         if (body) body.setAttribute('data-free','1');
       }
@@ -399,7 +401,23 @@ function isModeOpened(devId, modeId){
   }
   return false;
 }
-async function openVideoInSlot(devId, devNo) {
+
+/**
+ * 打开视频到空闲窗口
+ * 需求：同一设备的同一路流（主/副）只能打开一次；重复打开时 toast 提示。
+ * @param {*} devId
+ * @param {*} devNo
+ * @param {'main'|'sub'|string} stream 默认 'main'
+ */
+async function openVideoInSlot(devId, devNo, stream = 'main') {
+  // 先检查是否已存在同设备同一路流
+  const dup = mediaSlots.find(s => s.type === 'video' && String(s.devId) === String(devId) && String(s.stream || 'main') === String(stream || 'main'));
+  if (dup) {
+    const label = stream === 'sub' ? '副码流' : '主码流';
+    eventBus.emit('toast:show', { type:'info', message: (devNo ? (devNo + ' ') : '') + label + '已经打开' });
+    return;
+  }
+
   const idx = findFreeSlot();
   if (idx === -1) { eventBus.emit('toast:show', { type:'error', message:'没有可用窗口' }); return; }
   const body = document.getElementById('mediaBody'+idx);
@@ -422,10 +440,22 @@ async function openVideoInSlot(devId, devNo) {
   try { vp.style.cursor = 'pointer'; } catch (e) {}
 
   body.setAttribute('data-free','0');
-  title.textContent = (devNo || '') + ' 视频';
-  mediaSlots[idx].type = 'video'; mediaSlots[idx].inst = vp; mediaSlots[idx].devId = devId; mediaSlots[idx].devNo = devNo; mediaSlots[idx].modeId=null;
+  const streamLabel = stream === 'sub' ? '（副码流）' : '（主码流）';
+  title.textContent = (devNo || '') + ' 视频' + streamLabel;
+  mediaSlots[idx].type = 'video';
+  mediaSlots[idx].inst = vp;
+  mediaSlots[idx].devId = devId;
+  mediaSlots[idx].devNo = devNo;
+  mediaSlots[idx].modeId = null;
+  mediaSlots[idx].stream = stream || 'main';
 
-  try { await vp.play('webrtc://media.szdght.com/1/camera_audio'); }
+  try {
+    // 按需切换流地址（此处示例；如没有副码流地址，可保持同一路径）
+    const url = stream === 'sub'
+      ? 'webrtc://media.szdght.com/1/camera_audio_sub'
+      : 'webrtc://media.szdght.com/1/camera_audio';
+    await vp.play(url);
+  }
   catch (e) {
     eventBus.emit('toast:show', { type:'error', message:'拉流失败' });
     closeSlot(idx);
@@ -464,14 +494,14 @@ function openModeInSlot(devId, devNo, modeId) {
 
   body.setAttribute('data-free','0');
   title.textContent = (devNo || '') + ' ' + MODE_NAME(mid);
-  mediaSlots[idx].type = 'mode'; mediaSlots[idx].inst = mp; mediaSlots[idx].devId = devId; mediaSlots[idx].devNo = devNo; mediaSlots[idx].modeId = mid;
+  mediaSlots[idx].type = 'mode'; mediaSlots[idx].inst = mp; mediaSlots[idx].devId = devId; mediaSlots[idx].devNo = devNo; mediaSlots[idx].modeId = mid; mediaSlots[idx].stream = null;
 
   try { if (mp.start) mp.start(); } catch (e) {}
 }
 function closeSlot(idx) {
   const s = mediaSlots[idx]; if (!s) return;
   try { if (s.inst && s.inst.destroy) s.inst.destroy(); } catch (e) {}
-  s.inst=null; s.type=null; s.devId=null; s.devNo=null; s.modeId=null;
+  s.inst=null; s.type=null; s.devId=null; s.devNo=null; s.modeId=null; s.stream=null;
   const body = document.getElementById('mediaBody'+idx);
   const title = document.getElementById('mediaTitle'+idx);
   if (body) {
@@ -722,7 +752,7 @@ function enableGridClickOpen(grid) {
     if (slot.type === 'mode' && slot.devId && slot.modeId) {
       openModeDetailOverlay(slot.devId, slot.devNo, slot.modeId);
     } else if (slot.type === 'video' && slot.devId) {
-      openVideoDetailOverlay(slot.devId, slot.devNo);
+      openVideoDetailOverlay(slot.devId, slot.devNo, slot.stream || 'main');
     }
   }, true);
 }
@@ -856,8 +886,8 @@ function closeOverlay() {
 function openDeviceDetailOverlay(devId, devNo){
   openOverlay('/modules/features/pages/details/device-detail.html', { devId: devId, devNo: devNo });
 }
-function openVideoDetailOverlay(devId, devNo){
-  openOverlay('/modules/features/pages/details/video-detail.html', { devId: devId, devNo: devNo, stream:'main' });
+function openVideoDetailOverlay(devId, devNo, stream){
+  openOverlay('/modules/features/pages/details/video-detail.html', { devId: devId, devNo: devNo, stream: stream || 'main' });
 }
 function openModeDetailOverlay(devId, devNo, modeId){
   const mid = Number(modeId);
