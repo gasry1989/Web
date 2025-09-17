@@ -81,30 +81,13 @@ const mountedPreviews = [];
 function mountPreview(cellId, url){
   const cell = document.getElementById(cellId);
   if (!cell) return;
+  // 幂等保护：同一 cell 只挂载一次
+  if (cell.dataset.mountedPreview === '1') return;
   const vp = createVideoPreview({ objectFit:'fill' });
   cell.appendChild(vp);
   mountedPreviews.push(vp);
+  cell.dataset.mountedPreview = '1';
   vp.play(url).catch(err=>console.warn('[device-detail] preview play failed', cellId, err));
-}
-
-// 新增：每次刷新前清理已挂载的预览，避免重复叠加
-function destroyAllPreviews(){
-  try{
-    mountedPreviews.forEach(p=>{
-      try{ p.destroy && p.destroy(); }catch{}
-      try{ p.remove && p.remove(); }catch{}
-    });
-  }catch{}
-  mountedPreviews.length = 0;
-  // 只移除卡片内除 label 外的动态子节点
-  ['cellScreen','cellMain','cellSub'].forEach(id=>{
-    const cell = document.getElementById(id);
-    if (!cell) return;
-    Array.from(cell.children).forEach(ch=>{
-      if (ch.classList && ch.classList.contains('label')) return;
-      ch.remove();
-    });
-  });
 }
 
 /* ------------- 模式预览（占满剩余高度） + Mock ------------- */
@@ -220,10 +203,7 @@ try{
   document.getElementById('ownerIdLbl').textContent  = (d.parentUserId ?? d.ownerUserId ?? '--');
   document.getElementById('ownerAccLbl').textContent = (d.parentUserAccount ?? d.ownerUserAccount ?? '无');
 
-  // 先清理已有预览，避免重复叠加
-  destroyAllPreviews();
-
-  // 视频能力
+  // 视频能力（仅在需要时首次挂载，重复刷新不再新增）
   const screenCount = Number(d?.hardwareInfo?.screenCount ?? 0);
   const cameraCount = Number(d?.hardwareInfo?.cameraCount ?? 0);
 
@@ -268,8 +248,7 @@ try{
   }
 } catch (e) {
   console.warn('[device-detail] apiDeviceInfo failed; will still show defaults', e);
-  // 失败也先清理再尝试挂载默认预览，避免叠加
-  destroyAllPreviews();
+  // 失败时也仅尝试首次挂载，已挂载的不重复
   mountPreview('cellScreen', STREAMS.screen);
   mountPreview('cellMain', STREAMS.main);
   mountPreview('cellSub',  STREAMS.sub);
@@ -317,7 +296,7 @@ ui.btnTalk.onclick = ()=>{
 };
 ui.btnBack.onclick = ()=> parent.postMessage({ __detail:true, t:'back' }, '*');
 
-// 编辑信息/属主：弹窗
+// 编辑信息/属主：弹窗（保存成功仅刷新数据，不改动现有节点）
 document.getElementById('btnEditInfo').onclick  = async ()=>{
   const dev = currentDeviceInfo || { id: Number(devId), no: devNo || '', name: '', type: 0, modeList: [] };
   const ok = await openEditDeviceInfoModal({ dev });
