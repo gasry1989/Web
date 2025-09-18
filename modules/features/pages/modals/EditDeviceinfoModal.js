@@ -156,7 +156,7 @@ export function openEditDeviceInfoModal({ dev }) {
     modesBox.innerHTML = '';
     for (const m of modeList) {
       const idStr = String(m.id);
-      const cb = el('input', { type: 'checkbox', 'data-mode-id': idStr, id: `mode_${idStr}` });
+      const cb = el('input', { type: 'checkbox', disabled: true, 'data-mode-id': idStr, id: `mode_${idStr}` });
       const lab = el('label', { for: `mode_${idStr}` }, ` ${m.name}`);
       const line = el('div', {}, [cb, lab]);
       modesBox.appendChild(line);
