@@ -123,96 +123,205 @@ function refreshModeOptionsByType(typeId) {
 
 // 状态初值处（补充 hideUngrouped 默认值）
 let state = { groupedDevices: [], ungroupedDevices: [], expandLevel: 2, ungroupedCollapsed: false, hideUngrouped: false };
-  function normalizeUserInfo(ui) {
-    if (!ui) return null;
-    return {
-      userId: ui.userId ?? ui.id,
-      userName: ui.userName ?? ui.name ?? '',
-      parentUserId: ui.parentUserId ?? ui.pid ?? null,
-      parentUserName: ui.parentUserName ?? '',
-      rootUserName: ui.rootUserName ?? '',
-      onlineState: typeof ui.onlineState === 'boolean' ? ui.onlineState : undefined
-    };
-  }
+function getParentCache() {
+  const w = window || globalThis;
+  if (!w.__USER_PARENT_CACHE__) w.__USER_PARENT_CACHE__ = new Map(); // key:number -> pid:number
+  return w.__USER_PARENT_CACHE__;
+}
+function setParentLinkInCache(uid, pid) {
+  const cache = getParentCache();
+  if (Number.isFinite(uid) && Number.isFinite(pid)) cache.set(uid, pid);
+}
+function getParentLinkFromCache(uid) {
+  const cache = getParentCache();
+  return cache.get(uid);
+}
 
-  function buildForest(grouped) {
-    const map = new Map();
+function normalizeUserInfo(ui) {
+  if (!ui) return null;
+  const toNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const uid = toNum(ui.userId ?? ui.id);
+  const pid = toNum(ui.parentUserId ?? ui.pid);
+  return {
+    userId: uid,
+    userName: ui.userName ?? ui.name ?? '',
+    parentUserId: pid,
+    parentUserName: ui.parentUserName ?? '',
+    rootUserName: ui.rootUserName ?? '',
+    onlineState: typeof ui.onlineState === 'boolean' ? ui.onlineState : undefined
+  };
+}
+// 替换 buildForest：加入“父链缓存 + 名称缝合 + 可选调试日志”
+function buildForest(grouped) {
+  const id2node = new Map(); // number -> node
+  const id2meta = new Map(); // number -> ui meta
 
-    // 1) 先为每个“出现过的 userId”建节点
-    grouped.forEach(e => {
-      const ui = normalizeUserInfo(e.userInfo);
-      if (!ui || ui.userId == null) return;
-      if (!map.has(ui.userId)) {
-        map.set(ui.userId, {
-          userId: ui.userId,
-          userName: ui.userName,
-          parentUserId: ui.parentUserId,
-          children: [],
-          deviceChildren: [],
-          isOnline: ui.onlineState
-        });
-      }
-    });
+  const DBG = !!window.__DEBUG_TREE__;
+  const dbg = (...args) => { if (DBG) try { console.debug('[Tree]', ...args); } catch(_){} };
 
-    // 2) 为“缺失的父账号”创建占位父节点（父账号自己可能没有设备）
-    grouped.forEach(e => {
-      const ui = normalizeUserInfo(e.userInfo);
-      if (!ui) return;
-      const pid = ui.parentUserId;
-      if (pid != null && !map.has(pid)) {
-        map.set(pid, {
-          userId: pid,
-          userName: ui.parentUserName || ui.rootUserName || String(pid),
-          parentUserId: null, // 无更上层信息，置空
-          children: [],
-          deviceChildren: [],
-          isOnline: undefined
-        });
-      }
-    });
+  // 1) 收集“属主”信息，建/合并节点，并把明确的父链写入全局缓存
+  grouped.forEach((e) => {
+    const ui = normalizeUserInfo(e.userInfo);
+    if (!ui || ui.userId == null) return;
+    id2meta.set(ui.userId, ui);
 
-    // 3) 设备挂载到其所属用户节点
-    grouped.forEach(e => {
-      const ui = normalizeUserInfo(e.userInfo);
-      const di = e.devInfo || {};
-      if (!ui || ui.userId == null) return;
-      const node = map.get(ui.userId);
-      if (!node) return;
-      node.deviceChildren.push({
-        devId: di.id,
-        // 改为显示设备名称优先
-        devName: di.name || di.no || String(di.id || ''),
-        onlineState: !!di.onlineState,
-        raw: di
+    if (ui.parentUserId != null) setParentLinkInCache(ui.userId, ui.parentUserId);
+
+    const existed = id2node.get(ui.userId);
+    if (!existed) {
+      id2node.set(ui.userId, {
+        userId: ui.userId,
+        userName: ui.userName || '',
+        parentUserId: ui.parentUserId,
+        parentUserName: ui.parentUserName || '',
+        children: [],
+        deviceChildren: [],
+        isOnline: ui.onlineState
       });
-    });
-
-    // 4) 父子挂接
-    map.forEach(n => { n.children = n.children || []; });
-    map.forEach(n => {
-      const pid = n.parentUserId;
-      if (pid != null && map.has(pid)) {
-        map.get(pid).children.push(n);
-      }
-    });
-
-    // 5) 在线态向上聚合
-    function calc(n) {
-      if (typeof n.isOnline === 'boolean') return n.isOnline;
-      let on = n.deviceChildren?.some(d => d.onlineState) || false;
-      if (n.children?.length) for (const c of n.children) on = calc(c) || on;
-      n.isOnline = on;
-      return on;
+    } else {
+      existed.userName = existed.userName || ui.userName || '';
+      if (ui.parentUserId != null) existed.parentUserId = ui.parentUserId;
+      existed.parentUserName = existed.parentUserName || ui.parentUserName || '';
+      if (typeof existed.isOnline !== 'boolean' && typeof ui.onlineState === 'boolean') existed.isOnline = ui.onlineState;
     }
-    map.forEach(calc);
+  });
 
-    // 6) 根：无父 或 父不存在于 map
-    const roots = [];
-    map.forEach(n => {
-      if (n.parentUserId == null || !map.has(n.parentUserId)) roots.push(n);
+  // 2) 为“只作为别人 parent 出现”的用户创建占位；记录名称以便后续名称缝合
+  grouped.forEach((e) => {
+    const ui = normalizeUserInfo(e.userInfo);
+    if (!ui) return;
+    const pid = ui.parentUserId;
+    if (pid == null) return;
+
+    if (!id2meta.has(pid)) {
+      id2meta.set(pid, {
+        userId: pid,
+        userName: ui.parentUserName || ui.rootUserName || String(pid),
+        parentUserId: null,
+        parentUserName: '',
+        rootUserName: ui.rootUserName || '',
+        onlineState: undefined
+      });
+    }
+
+    if (!id2node.has(pid)) {
+      const pm = id2meta.get(pid);
+      id2node.set(pid, {
+        userId: pid,
+        userName: (pm && pm.userName) || String(pid),
+        parentUserId: (pm && pm.parentUserId != null) ? pm.parentUserId : null,
+        parentUserName: pm && pm.parentUserName || '',
+        children: [],
+        deviceChildren: [],
+        isOnline: undefined
+      });
+    } else {
+      const n = id2node.get(pid);
+      const pm = id2meta.get(pid);
+      if (!n.userName && pm && pm.userName) n.userName = pm.userName;
+      if (n.parentUserId == null && pm && pm.parentUserId != null) n.parentUserId = pm.parentUserId;
+    }
+  });
+
+  // 3) 设备挂属主
+  grouped.forEach((e) => {
+    const ui = normalizeUserInfo(e.userInfo);
+    const di = e.devInfo || {};
+    if (!ui || ui.userId == null) return;
+    const n = id2node.get(ui.userId);
+    if (!n) return;
+    n.deviceChildren.push({
+      devId: di.id,
+      devName: di.name || di.no || String(di.id || ''),
+      onlineState: !!di.onlineState,
+      raw: di
     });
-    return roots;
+  });
+
+  // 4) 补链阶段：
+  // 4.1 用全局缓存给 parentUserId 为空的节点补父
+  id2node.forEach((n) => {
+    if (n.parentUserId == null) {
+      const cachedPid = getParentLinkFromCache(n.userId);
+      if (Number.isFinite(cachedPid)) {
+        n.parentUserId = cachedPid;
+        dbg('patch parent from cache', { uid: n.userId, pid: cachedPid });
+      }
+    }
+  });
+
+  // 4.2 名称缝合（当 parentUserId 仍然缺失，但有 parentUserName 时）
+  //     如果找到同名用户节点，则用其 userId 作为父，并写回缓存
+  const name2id = new Map();
+  id2node.forEach((n) => {
+    const nm = (n.userName || '').trim();
+    if (nm) name2id.set(nm, n.userId);
+  });
+  id2node.forEach((n) => {
+    if (n.parentUserId == null) {
+      const pnm = (n.parentUserName || '').trim();
+      if (pnm && name2id.has(pnm)) {
+        const pid = name2id.get(pnm);
+        if (Number.isFinite(pid) && pid !== n.userId) {
+          n.parentUserId = pid;
+          setParentLinkInCache(n.userId, pid);
+          dbg('stitch parent by name', { uid: n.userId, pnm, pid });
+        }
+      }
+    }
+  });
+
+  // 4.3 再用元信息兜底一次（属主记录可能在后面）
+  id2node.forEach((n, uid) => {
+    const m = id2meta.get(uid);
+    if (m && n.parentUserId == null && m.parentUserId != null) {
+      n.parentUserId = m.parentUserId;
+      setParentLinkInCache(uid, m.parentUserId);
+      dbg('patch parent from meta', { uid, pid: m.parentUserId });
+    }
+  });
+
+  // 5) 挂接父子（防自循环）
+  id2node.forEach((n) => { if (!n.children) n.children = []; });
+  id2node.forEach((n) => {
+    const pid = n.parentUserId;
+    if (pid != null && pid !== n.userId && id2node.has(pid)) {
+      id2node.get(pid).children.push(n);
+    }
+  });
+
+  // 6) 在线态聚合
+  function calcOn(node) {
+    if (typeof node.isOnline === 'boolean') return node.isOnline;
+    let on = Array.isArray(node.deviceChildren) && node.deviceChildren.some(d => d.onlineState);
+    if (Array.isArray(node.children)) {
+      for (const c of node.children) on = calcOn(c) || on;
+    }
+    node.isOnline = on;
+    return on;
   }
+  id2node.forEach(calcOn);
+
+  // 7) 根节点 + 调试输出
+  const roots = [];
+  id2node.forEach((n) => {
+    const isRoot = (n.parentUserId == null || !id2node.has(n.parentUserId));
+    if (isRoot && DBG) {
+      dbg('root cause', {
+        userId: n.userId,
+        userName: n.userName,
+        parentUserId: n.parentUserId,
+        parentUserName: n.parentUserName
+      });
+    }
+    if (isRoot) roots.push(n);
+  });
+  return roots;
+}
+
 
   function renderUserNodeHTML(node, level, expandLevel, onlyOnline = false) {
     if (onlyOnline && !node.isOnline) return '';
