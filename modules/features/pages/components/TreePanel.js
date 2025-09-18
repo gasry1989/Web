@@ -14,16 +14,56 @@ export function createTreePanel() {
   let isReady = false;
 
   function onFilterChanged(e) {
-    const t = e && e.target;
-    if (!t || !t.id) return;
-    const ids = new Set(['fltDevType', 'fltDevMode', 'fltSearch', 'fltOnline']);
-    if (!ids.has(t.id)) return;
-    host.dispatchEvent(new CustomEvent('filterchange', {
-      bubbles: true,
-      detail: getFilterValues()
-    }));
-    render();
+  const t = e && e.target;
+  if (!t || !t.id) return;
+  const ids = new Set(['fltDevType', 'fltDevMode', 'fltSearch', 'fltOnline']);
+  if (!ids.has(t.id)) return;
+
+  if (t.id === 'fltDevType') {
+    const typeVal = Number(t.value || '0');
+    refreshModeOptionsByType(typeVal);
   }
+
+  host.dispatchEvent(new CustomEvent('filterchange', {
+    bubbles: true,
+    detail: getFilterValues()
+  }));
+  render();
+}
+
+  // 新增函数：根据“设备类型”刷新“设备模式”选项（0=全部; 1/2/3=只 0,1,2,3; 4=只 0,4）
+  // 修改/增强：refreshModeOptionsByType —— 使用 __sourceAllModes 作为可靠数据源
+function refreshModeOptionsByType(typeId) {
+  const mSel = root.getElementById('fltDevMode');
+  if (!mSel) return;
+
+  // 确保有数据源：优先页面注入的全量模式表；其次保底用当前选项快照
+  const source = Array.isArray(mSel.__sourceAllModes)
+    ? mSel.__sourceAllModes
+    : (Array.from(mSel.options)
+        .filter(o => o.value !== '0')
+        .map(o => ({ modeId: Number(o.value), modeName: o.textContent || '' })));
+
+  const prev = Number(mSel.value || '0');
+
+  let allowIds;
+  if (typeId === 0) allowIds = [1,2,3,4];
+  else if (typeId === 4) allowIds = [4];
+  else allowIds = [1,2,3];
+
+  // 重建“全部(0)” + 允许的模式（按索引 1/2/3/4 过滤）
+  const opts = ['<option value="0">全部</option>'];
+  source.forEach(m => {
+    const mid = Number(m.modeId);
+    if (allowIds.includes(mid)) {
+      opts.push(`<option value="${mid}">${m.modeName}</option>`);
+    }
+  });
+  mSel.innerHTML = opts.join('');
+
+  // 当前值不在允许范围则回退到 0
+  mSel.value = (prev === 0 || allowIds.includes(prev)) ? String(prev) : '0';
+}
 
   (async () => {
     try {
@@ -46,26 +86,26 @@ export function createTreePanel() {
     const treeEl = root.getElementById('tree');
     if (!treeEl) return;
 
-    // 修正：getFilterValues 返回的是 filterOnline
     const { filterOnline } = getFilterValues();
     const onlyOnline = filterOnline;
 
     const roots = buildForest(state.groupedDevices);
     const expandLevel = state.expandLevel || 2;
 
-    const ungrouped = onlyOnline
-      ? state.ungroupedDevices.filter(e => !!(e.devInfo && e.devInfo.onlineState))
-      : state.ungroupedDevices;
+    const showUngrouped = !state.hideUngrouped;
+    const ungrouped = showUngrouped
+      ? (onlyOnline
+          ? state.ungroupedDevices.filter(e => !!(e.devInfo && e.devInfo.onlineState))
+          : state.ungroupedDevices)
+      : [];
 
     const secCls = state.ungroupedCollapsed ? 'is-collapsed' : '';
-    const html = `
-      <div class="gdt">${roots.map(r => renderUserNodeHTML(r, 1, expandLevel, onlyOnline)).join('')}</div>
+    const ungroupedSection = showUngrouped ? `
       <div class="sec ${secCls}">
         <div class="sec__title">未分组设备 (${ungrouped.length})</div>
         <div class="list">
           ${ungrouped.map(e => {
             const d = e.devInfo || {};
-            // 改为显示设备名称优先
             const name = d.name || d.no || String(d.id || '');
             const cls = d.onlineState ? 'is-online' : 'is-offline';
             return `<div class="chip ${cls}" data-devid="${d.id}" title="${escapeHTML(name)}">
@@ -73,12 +113,16 @@ export function createTreePanel() {
             </div>`;
           }).join('')}
         </div>
-      </div>`;
+      </div>` : '';
+
+    const html = `
+      <div class="gdt">${roots.map(r => renderUserNodeHTML(r, 1, expandLevel, onlyOnline)).join('')}</div>
+      ${ungroupedSection}`;
     treeEl.innerHTML = html;
   }
 
-  let state = { groupedDevices: [], ungroupedDevices: [], expandLevel: 2, ungroupedCollapsed: false };
-
+// 状态初值处（补充 hideUngrouped 默认值）
+let state = { groupedDevices: [], ungroupedDevices: [], expandLevel: 2, ungroupedCollapsed: false, hideUngrouped: false };
   function normalizeUserInfo(ui) {
     if (!ui) return null;
     return {
@@ -235,31 +279,42 @@ export function createTreePanel() {
     }
   });
 
-  function setData({ groupedDevices = [], ungroupedDevices = [], expandLevel = 2, devTypes, devModes } = {}) {
-    state.groupedDevices = groupedDevices;
-    state.ungroupedDevices = ungroupedDevices;
-    state.expandLevel = expandLevel;
-    const apply = () => {
-      if (devTypes) {
-        const sel = root.getElementById('fltDevType');
-        if (sel) {
-          const cur = sel.value;
-          sel.innerHTML = `<option value="0">全部</option>` + devTypes.map(t => `<option value="${t.typeId}">${t.typeName}</option>`).join('');
-          sel.value = cur || '0';
-        }
+  // 修改：setData —— 保存页面注入的“全量模式表”，并按当前类型联动一次
+function setData({ groupedDevices = [], ungroupedDevices = [], expandLevel = 2, devTypes, devModes, hideUngrouped } = {}) {
+  state.groupedDevices = groupedDevices;
+  state.ungroupedDevices = ungroupedDevices;
+  state.expandLevel = expandLevel;
+  if (typeof hideUngrouped === 'boolean') state.hideUngrouped = hideUngrouped;
+
+  const apply = () => {
+    if (devTypes) {
+      const sel = root.getElementById('fltDevType');
+      if (sel) {
+        const cur = sel.value;
+        sel.innerHTML = `<option value="0">全部</option>` + devTypes.map(t => `<option value="${t.typeId}">${t.typeName}</option>`).join('');
+        sel.value = cur || '0';
       }
-      if (devModes) {
-        const sel = root.getElementById('fltDevMode');
-        if (sel) {
-          const cur = sel.value;
-          sel.innerHTML = `<option value="0">全部</option>` + devModes.map(m => `<option value="${m.modeId}">${m.modeName}</option>`).join('');
-          sel.value = cur || '0';
-        }
+    }
+    if (devModes) {
+      const sel = root.getElementById('fltDevMode');
+      if (sel) {
+        // 1) 写入“全部 + 页面期望显示的模式项”（索引 1/2/3/4）
+        const cur = sel.value;
+        sel.innerHTML = `<option value="0">全部</option>` + devModes.map(m => `<option value="${m.modeId}">${m.modeName}</option>`).join('');
+        sel.value = cur || '0';
+        // 2) 额外保存“全量模式表”到 __sourceAllModes，供联动过滤使用
+        //    注意：这里保存的是“索引模式（1/2/3/4）对应的名称集合”，由页面保证与索引一致
+        sel.__sourceAllModes = devModes.slice ? devModes.slice() : devModes;
+        // 3) 按当前类型值做一次联动，避免首次显示只有“全部”的情况
+        const tSel = root.getElementById('fltDevType');
+        const typeVal = Number((tSel && tSel.value) || '0');
+        refreshModeOptionsByType(typeVal);
       }
-      render();
-    };
-    if (isReady) apply(); else ready.promise.then(apply).catch(()=>{});
-  }
+    }
+    render();
+  };
+  if (isReady) apply(); else ready.promise.then(apply).catch(()=>{});
+}
 
   function getFilterValues() {
     const tSel = root.getElementById('fltDevType');

@@ -83,24 +83,76 @@ export function unmountVideoCenterPage() {
 }
 
 /* ---------------- 数据加载 ---------------- */
+// 修改函数：bootstrapData
 async function bootstrapData() {
   const [typesRes, modesRes] = await Promise.allSettled([ apiDevTypes(), apiDevModes() ]);
   const types = typesRes.status==='fulfilled' ? (typesRes.value||{}) : {};
   const modes = modesRes.status==='fulfilled' ? (modesRes.value||{}) : {};
-  try { tree.setData({ devTypes: types.devTypeList||[], devModes: modes.devModeList||[] }); } catch {}
+
+  // 缓存完整列表（用于“索引 -> 真实ID”的映射）
+  const allTypes = Array.isArray(types.devTypeList) ? types.devTypeList : [];
+  const allModes = Array.isArray(modes.devModeList) ? modes.devModeList : [];
+  tree.__allTypes = allTypes;
+  tree.__allModes = allModes;
+
+  // 视频中心下拉显示：类型仅索引 4；模式仅索引 4
+  const t4 = allTypes[3]; // 第 4 项（索引从 0 开始）
+  const m4 = allModes[3];
+  const vcTypes = t4 ? [{ typeId: 4, typeName: t4.typeName }] : [];
+  const vcModes = m4 ? [{ modeId: 4, modeName: m4.modeName }] : [];
+
+  try {
+    tree.setData({
+      devTypes: vcTypes,
+      devModes: vcModes, // setData 会默认加“全部(0)”，下面移除
+      groupedDevices: [],
+      ungroupedDevices: [],
+      expandLevel: 2,
+      hideUngrouped: true
+    });
+
+    // 模式只保留索引 4（移除“全部(0)”）
+    const modeSel = tree.controls?.modeSelect?.();
+    if (modeSel) {
+      modeSel.innerHTML = vcModes.map(m => `<option value="4">${m.modeName}</option>`).join('');
+      modeSel.value = '4';
+      modeSel.dispatchEvent(new Event('change', { bubbles:true }));
+    }
+  } catch {}
 
   await reloadByFilters();
 }
+
+// 修改函数：reloadByFilters
 async function reloadByFilters() {
-  const f = tree.getFilterValues();
-  const [gRes, uRes] = await Promise.allSettled([ apiGroupedDevices(f), apiUngroupedDevices(f) ]);
+  // 直接按索引 4 取真实 ID
+  const allTypes = Array.isArray(tree.__allTypes) ? tree.__allTypes : [];
+  const allModes = Array.isArray(tree.__allModes) ? tree.__allModes : [];
+  const t4 = allTypes[3];
+  const m4 = allModes[3];
+
+  const payload = {
+    searchStr: (tree.getFilterValues().searchStr || ''),
+    filterOnline: !!(tree.getFilterValues().filterOnline),
+    devTypeIdArr: t4 ? [Number(t4.typeId)] : [],
+    devModeIdArr: m4 ? [Number(m4.modeId)] : []
+  };
+
+  const [gRes] = await Promise.allSettled([ apiGroupedDevices(payload) ]);
   const grouped = gRes.status==='fulfilled' ? (gRes.value||{devList:[]}) : {devList:[]};
-  const ungrouped = uRes.status==='fulfilled' ? (uRes.value||{devList:[]}) : {devList:[]};
 
-  try { tree.setData({ groupedDevices: grouped.devList||[], ungroupedDevices: ungrouped.devList||[], expandLevel: 2 }); } catch {}
+  try {
+    tree.setData({
+      groupedDevices: grouped.devList || [],
+      ungroupedDevices: [], // 不显示未分组
+      expandLevel: 2,
+      hideUngrouped: true
+    });
+  } catch {}
 
+  // 索引
   deviceMap.clear();
-  const all = [].concat(grouped.devList||[], ungrouped.devList||[]);
+  const all = (grouped.devList || []);
   all.forEach(item => {
     const di = item.devInfo || {};
     deviceMap.set(Number(di.id), item);

@@ -41,22 +41,37 @@ export function apiDevTypes() {
 export function apiDevModes() {
   return httpPost(apiPath('3.14'), {});
 }
-export function apiGroupedDevices(filters) {
-  const { devType, devMode, searchStr, filterOnline } = filters;
+// 修改函数：apiGroupedDevices（3.15 新参数）
+export function apiGroupedDevices(filters = {}) {
+  const {
+    searchStr = '',
+    filterOnline = false,
+    devTypeIdArr = [],
+    devModeIdArr = []
+  } = filters;
+
   return httpPost(apiPath('3.15'), {
-    devType: devType || 0,
-    devMode: devMode || 0,
-    filterStr: searchStr || '',
-    filterOnline: !!filterOnline
+    filterStr: searchStr,
+    filterOnline: !!filterOnline,
+    devTypeIdArr,
+    devModeIdArr
   });
 }
-export function apiUngroupedDevices(filters) {
-  const { devType, devMode, searchStr, filterOnline } = filters;
+
+// 修改函数：apiUngroupedDevices（3.16 新参数）
+export function apiUngroupedDevices(filters = {}) {
+  const {
+    searchStr = '',
+    filterOnline = false,
+    devTypeIdArr = [],
+    devModeIdArr = []
+  } = filters;
+
   return httpPost(apiPath('3.16'), {
-    devType: devType || 0,
-    devMode: devMode || 0,
-    filterStr: searchStr || '',
-    filterOnline: !!filterOnline
+    filterStr: searchStr,
+    filterOnline: !!filterOnline,
+    devTypeIdArr,
+    devModeIdArr
   });
 }
 export function apiDeviceInfo(devId) {

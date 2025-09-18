@@ -89,7 +89,7 @@ export function unmountDataCenterPage() {
   if (root) { try { root.remove(); } catch {} root = null; }
 }
 
-/* ---------------- 数据加载 ---------------- */
+  /* ---------------- 数据加载 ---------------- */
 async function bootstrapData() {
   const [typesRes, modesRes] = await Promise.allSettled([
     apiDevTypes(), apiDevModes()
@@ -97,39 +97,78 @@ async function bootstrapData() {
   const types = typesRes.status==='fulfilled' ? (typesRes.value||{}) : {};
   const modes = modesRes.status==='fulfilled' ? (modesRes.value||{}) : {};
 
-  // 同步到树的下拉
+  // 缓存完整列表（索引 -> 真实 ID 映射在 reloadByFilters 用）
+  const allTypes = Array.isArray(types.devTypeList) ? types.devTypeList : [];
+  const allModes = Array.isArray(modes.devModeList) ? modes.devModeList : [];
+  tree.__allTypes = allTypes;
+  tree.__allModes = allModes;
+
+  // 下拉展示（索引）：类型 0/1/2/3，模式 0/1/2/3
+  const dcTypes = allTypes.slice(0, 3).map((t, idx) => ({ typeId: idx + 1, typeName: t.typeName }));
+  const dcModes = allModes.slice(0, 3).map((m, idx) => ({ modeId: idx + 1, modeName: m.modeName }));
+
   try {
-    tree.setData({ devTypes: types.devTypeList || [], devModes: modes.devModeList || [] });
+    tree.setData({
+      devTypes: dcTypes,
+      devModes: dcModes,   // TreePanel 会保存为 __sourceAllModes，并按类型联动
+      groupedDevices: [],
+      ungroupedDevices: [],
+      expandLevel: 2,
+      hideUngrouped: true
+    });
   } catch (e) {}
 
   await reloadByFilters();
 }
 
+// 修改函数：reloadByFilters
 async function reloadByFilters() {
   const f = tree.getFilterValues();
-  const [gRes, uRes] = await Promise.allSettled([
-    apiGroupedDevices(f), apiUngroupedDevices(f)
+  const allTypes = Array.isArray(tree.__allTypes) ? tree.__allTypes : [];
+  const allModes = Array.isArray(tree.__allModes) ? tree.__allModes : [];
+
+  // 索引 -> 真实 ID 数组
+  // 类型索引：0 -> 前三项全部；1/2/3 -> 对应 allTypes[0/1/2]
+  const typeArr = (Number(f.devType) === 0)
+    ? allTypes.slice(0,3).map(t => Number(t.typeId)).filter(Boolean)
+    : (allTypes[Number(f.devType) - 1] ? [Number(allTypes[Number(f.devType) - 1].typeId)] : []);
+
+  // 模式索引：0 -> 前三项全部；1/2/3 -> 对应 allModes[0/1/2]
+  const modeArr = (Number(f.devMode) === 0)
+    ? allModes.slice(0,3).map(m => Number(m.modeId)).filter(Boolean)
+    : (allModes[Number(f.devMode) - 1] ? [Number(allModes[Number(f.devMode) - 1].modeId)] : []);
+
+  const payload = {
+    searchStr: f.searchStr,
+    filterOnline: f.filterOnline,
+    devTypeIdArr: typeArr,
+    devModeIdArr: modeArr
+  };
+
+  const [gRes] = await Promise.allSettled([
+    apiGroupedDevices(payload)
+    // 数据中心不显示未分组，此处不再请求 3.16，避免多余流量
   ]);
   const grouped = gRes.status==='fulfilled' ? (gRes.value||{devList:[]}) : {devList:[]};
-  const ungrouped = uRes.status==='fulfilled' ? (uRes.value||{devList:[]}) : {devList:[]};
 
-  // 给树填充数据（尽力而为）
   try {
     tree.setData({
       groupedDevices: grouped.devList || [],
-      ungroupedDevices: ungrouped.devList || [],
-      expandLevel: 2
+      ungroupedDevices: [], // 不显示未分组
+      expandLevel: 2,
+      hideUngrouped: true
     });
   } catch (e) {}
 
   // 建索引
   deviceMap.clear();
-  const all = [].concat(grouped.devList || [], ungrouped.devList || []);
+  const all = (grouped.devList || []);
   all.forEach(item => {
     const di = item.devInfo || {};
     deviceMap.set(Number(di.id), item);
   });
 }
+ 
 
 /* ---------------- 行管理 ---------------- */
 function openDeviceRow(devId) {

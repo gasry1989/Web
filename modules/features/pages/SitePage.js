@@ -231,8 +231,8 @@ function loadCollapsed(){ try{ return localStorage.getItem(KEY_TREE_COLLAPSED) =
 function saveCollapsed(v){ try{ localStorage.setItem(KEY_TREE_COLLAPSED, v?'1':'0'); } catch (e) {} }
 
 /* ---------------- 数据装配（同步 filters 到 siteState） ---------------- */
+// 修改函数：bootstrapData（不限制类型；但后续查询改用数组参数）
 async function bootstrapData(summaryEl, notifyEl) {
-  // 1) 并发请求基础数据，但不因单个失败而中断
   const [typesRes, modesRes, onlineRes, summaryRes] = await Promise.allSettled([
     apiDevTypes(),
     apiDevModes(),
@@ -240,32 +240,46 @@ async function bootstrapData(summaryEl, notifyEl) {
     apiDeviceSummary()
   ]);
 
-  if (typesRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiDevTypes failed:', typesRes.reason && (typesRes.reason.message || typesRes.reason));
-  if (modesRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiDevModes failed:', modesRes.reason && (modesRes.reason.message || modesRes.reason));
-  if (onlineRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiOnlineList failed:', onlineRes.reason && (onlineRes.reason.message || onlineRes.reason));
-  if (summaryRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiDeviceSummary failed:', summaryRes.reason && (summaryRes.reason.message || summaryRes.reason));
-
   const types   = typesRes.status   === 'fulfilled' ? (typesRes.value || {})   : {};
   const modes   = modesRes.status   === 'fulfilled' ? (modesRes.value || {})   : {};
   const online  = onlineRes.status  === 'fulfilled' ? (onlineRes.value || {})  : { list: [] };
   const summary = summaryRes.status === 'fulfilled' ? (summaryRes.value || {}) : { stateList: [] };
 
-  // 2) 同步当前筛选条件
   let filters = {};
-  try { filters = getFiltersFromTree(); siteState.set({ filters: filters }); } catch (e) { console.warn('[Site][bootstrap] read/set filters failed', e); }
+  try { filters = getFiltersFromTree(); siteState.set({ filters: filters }); } catch (e) {}
 
-  // 3) 拉取树数据（同样容错）
+  // 统一：数组参数
+  function computeTypeArr(devType) {
+    const allowedTypeIds = Array.isArray(types.devTypeList) ? types.devTypeList.map(t => Number(t.typeId)).filter(Boolean) : [1,2,3,4];
+    return Number(devType) === 0 ? allowedTypeIds : [Number(devType)].filter(Boolean);
+  }
+  function computeModeArr(devType, devMode) {
+    const dm = Number(devMode || 0);
+    const dt = Number(devType || 0);
+    if (dm > 0) return [dm];
+    if (dt === 4) return [4];
+    if (dt === 0) return [1,2,3,4];
+    return [1,2,3];
+  }
+
   const [groupedRes, ungroupedRes] = await Promise.allSettled([
-    apiGroupedDevices(filters),
-    apiUngroupedDevices(filters)
+    apiGroupedDevices({
+      searchStr: filters.searchStr,
+      filterOnline: filters.filterOnline,
+      devTypeIdArr: computeTypeArr(filters.devType),
+      devModeIdArr: computeModeArr(filters.devType, filters.devMode)
+    }),
+    apiUngroupedDevices({
+      searchStr: filters.searchStr,
+      filterOnline: filters.filterOnline,
+      devTypeIdArr: computeTypeArr(filters.devType),
+      devModeIdArr: computeModeArr(filters.devType, filters.devMode)
+    })
   ]);
-  if (groupedRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiGroupedDevices failed:', groupedRes.reason && (groupedRes.reason.message || groupedRes.reason));
-  if (ungroupedRes.status !== 'fulfilled') console.warn('[Site][bootstrap] apiUngroupedDevices failed:', ungroupedRes.reason && (ungroupedRes.reason.message || ungroupedRes.reason));
 
   const grouped   = groupedRes.status   === 'fulfilled' ? (groupedRes.value || { devList: [] })   : { devList: [] };
   const ungrouped = ungroupedRes.status === 'fulfilled' ? (ungroupedRes.value || { devList: [] }) : { devList: [] };
 
-  // 4) 渲染树与地图（尽力而为）
   try {
     tree.setData({
       groupedDevices: grouped.devList || [],
@@ -274,48 +288,70 @@ async function bootstrapData(summaryEl, notifyEl) {
       devTypes: (types.devTypeList || []),
       devModes: (modes.devModeList || [])
     });
-  } catch (e) { console.warn('[Site][bootstrap] tree.setData failed', e); }
+  } catch (e) {}
 
   try {
     const all = [].concat(grouped.devList || [], ungrouped.devList || []);
     mapView.setMarkers(all);
-  } catch (e) { console.warn('[Site][bootstrap] mapView.setMarkers failed', e); }
+  } catch (e) {}
 
-  // 5) 摘要与通知
-  try { renderSummary(summaryEl, summary); } catch (e) { console.warn('[Site][bootstrap] renderSummary failed', e); }
-  try { renderNotify(notifyEl, (online.list || []).slice(0,50)); } catch (e) { console.warn('[Site][bootstrap] renderNotify failed', e); }
+  try { renderSummary(summaryEl, summary); } catch (e) {}
+  try { renderNotify(notifyEl, (online.list || []).slice(0,50)); } catch (e) {}
 }
 
-// 根据当前树筛选刷新树与地图
+// 修改函数：reloadByFilters（不限制类型；改用数组参数）
 async function reloadByFilters() {
-  // 1) 取筛选条件（容错）
   let filters = {};
-  try { filters = getFiltersFromTree(); siteState.set({ filters: filters }); } catch (e) { console.warn('[Site][reload] read/set filters failed', e); }
+  try { filters = getFiltersFromTree(); siteState.set({ filters: filters }); } catch (e) {}
 
-  // 2) 拉取数据（容错、不阻断）
+  // 取“全部类型”列表用于 devType=0 的展开
+  // 这里用上次 bootstrap 缓存不方便，直接拉一遍类型表最稳（但为最小改动，这里直接基于当前树无法获取，按常见全集兜底）
+  // 若需要严格用 3.13 返回的全集，可将其缓存于外层。
+  const typesRes = await apiDevTypes().catch(() => ({ devTypeList: [{typeId:1},{typeId:2},{typeId:3},{typeId:4}] }));
+  const allTypeIds = Array.isArray(typesRes.devTypeList) ? typesRes.devTypeList.map(t=>Number(t.typeId)).filter(Boolean) : [1,2,3,4];
+
+  function computeTypeArr(devType) {
+    return Number(devType) === 0 ? allTypeIds : [Number(devType)].filter(Boolean);
+  }
+  function computeModeArr(devType, devMode) {
+    const dm = Number(devMode || 0);
+    const dt = Number(devType || 0);
+    if (dm > 0) return [dm];
+    if (dt === 4) return [4];
+    if (dt === 0) return [1,2,3,4];
+    return [1,2,3];
+  }
+
   const [groupedRes, ungroupedRes] = await Promise.allSettled([
-    apiGroupedDevices(filters),
-    apiUngroupedDevices(filters)
+    apiGroupedDevices({
+      searchStr: filters.searchStr,
+      filterOnline: filters.filterOnline,
+      devTypeIdArr: computeTypeArr(filters.devType),
+      devModeIdArr: computeModeArr(filters.devType, filters.devMode)
+    }),
+    apiUngroupedDevices({
+      searchStr: filters.searchStr,
+      filterOnline: filters.filterOnline,
+      devTypeIdArr: computeTypeArr(filters.devType),
+      devModeIdArr: computeModeArr(filters.devType, filters.devMode)
+    })
   ]);
-  if (groupedRes.status !== 'fulfilled') console.warn('[Site][reload] apiGroupedDevices failed:', groupedRes.reason && (groupedRes.reason.message || groupedRes.reason));
-  if (ungroupedRes.status !== 'fulfilled') console.warn('[Site][reload] apiUngroupedDevices failed:', ungroupedRes.reason && (ungroupedRes.reason.message || ungroupedRes.reason));
 
   const grouped   = groupedRes.status   === 'fulfilled' ? (groupedRes.value || { devList: [] })   : { devList: [] };
   const ungrouped = ungroupedRes.status === 'fulfilled' ? (ungroupedRes.value || { devList: [] }) : { devList: [] };
 
-  // 3) 渲染树与地图（尽力而为）
   try {
     tree.setData({
       groupedDevices: grouped.devList || [],
       ungroupedDevices: ungrouped.devList || [],
       expandLevel: 2
     });
-  } catch (e) { console.warn('[Site][reload] tree.setData failed', e); }
+  } catch (e) {}
 
   try {
     const all = [].concat(grouped.devList || [], ungrouped.devList || []);
     mapView.setMarkers(all);
-  } catch (e) { console.warn('[Site][reload] mapView.setMarkers failed', e); }
+  } catch (e) {}
 }
 
 function renderSummary(el, summary) {
