@@ -220,11 +220,12 @@ function openDeviceRow(devId) {
   const body = row.querySelector('.dc-row-bd');
   const closeBtn = row.querySelector('[data-close]');
 
-  // 新增：标题栏点击 -> 设备详情
+  // 新增：标题栏点击 -> 设备详情；并显示可点击鼠标
   header.addEventListener('click', (ev) => {
     if (ev.target.closest('[data-close]')) return; // 排除点 X
     openDeviceDetailOverlay(devId, devNo);
   });
+  try { header.style.cursor = 'pointer'; } catch {}
 
   // 依据后端顺序：取 devInfo.modeList 的前 1~3 个，且仅保留前端已支持的模式（1/2/3）
   const allow = new Set(PREF_MODES);
@@ -242,13 +243,19 @@ function openDeviceRow(devId) {
     cell.appendChild(label);
 
     const inst = createModeComponent(mid, devId);
-    cell.appendChild((inst && (inst.el || inst)) || document.createTextNode(''));
+    const instEl = inst && (inst.el || inst);
+    if (instEl) cell.appendChild(instEl);
 
     // 覆盖层用于点击打开详情
     const clickLayer = document.createElement('div');
     clickLayer.className = 'clickable';
     clickLayer.addEventListener('click', () => openModeDetailOverlay(devId, devNo, mid));
     cell.appendChild(clickLayer);
+
+    // 新增：光标统一显示为“可点击”
+    try { cell.style.cursor = 'pointer'; } catch {}
+    try { label.style.cursor = 'pointer'; } catch {}
+    try { if (instEl && instEl.style) instEl.style.cursor = 'pointer'; } catch {}
 
     try { inst && inst.start && inst.start(); } catch {}
 

@@ -423,6 +423,7 @@ async function openVideoForDevice(devId) {
   if (cameraCount < 1) { eventBus.emit('toast:show', { type:'warn', message:'设备不支持打开视频' }); return; }
 
   const cell = grid.querySelector(`.vc-cell[data-idx="${slotIdx}"]`);
+  const header = cell ? cell.querySelector('.vc-hd') : null;
   const body = document.getElementById('vcBody'+slotIdx);
   const title = document.getElementById('vcTitle'+slotIdx);
 
@@ -431,6 +432,11 @@ async function openVideoForDevice(devId) {
   body.setAttribute('data-free','0');
   title.textContent = `${devNo} 视频（主码流）`;
   if (cell) cell.setAttribute('aria-empty','0'); // 显示标题栏
+
+  // 新增：显示可点击鼠标（标题栏 + 画面 + 媒体元素）
+  try { if (header) header.style.cursor = 'pointer'; } catch {}
+  try { body.style.cursor = 'pointer'; } catch {}
+  try { if (main && main.style) main.style.cursor = 'pointer'; } catch {}
 
   slots[slotIdx].type = 'video';
   slots[slotIdx].devId = devId;
@@ -447,6 +453,10 @@ async function openVideoForDevice(devId) {
     pipWrap.appendChild(sub);
     body.appendChild(pipWrap);
     slots[slotIdx].sub = sub;
+
+    // 子画面也显示可点击鼠标
+    try { pipWrap.style.cursor = 'pointer'; } catch {}
+    try { if (sub && sub.style) sub.style.cursor = 'pointer'; } catch {}
   }
 
   try {
@@ -465,14 +475,22 @@ function closeSlot(idx, opts = {}) {
   try { s.sub?.destroy?.(); } catch {}
   if (s.offStatus) { try { s.offStatus(); } catch {} }
   s.type = null; s.devId=null; s.devNo=null; s.main=null; s.sub=null;
+
   const cell = grid.querySelector(`.vc-cell[data-idx="${idx}"]`);
+  const header = cell ? cell.querySelector('.vc-hd') : null;
   const body = document.getElementById('vcBody'+idx);
   const title = document.getElementById('vcTitle'+idx);
+
   if (opts.removeCell) {
     try { grid.querySelector(`.vc-cell[data-idx="${idx}"]`)?.remove(); } catch {}
   } else {
-    if (body) { body.innerHTML=''; body.setAttribute('data-free','1'); }
+    if (body) {
+      body.innerHTML=''; body.setAttribute('data-free','1');
+      // 新增：关闭时还原鼠标样式
+      try { body.style.cursor = ''; } catch {}
+    }
     if (title) title.textContent = '';
+    if (header) { try { header.style.cursor = ''; } catch {} }
     if (cell) cell.setAttribute('aria-empty','1'); // 恢复“纯黑面板”
   }
   if (devId != null) opened.delete(devId);
