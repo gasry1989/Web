@@ -1,26 +1,77 @@
 /**
- * VideoCenterPage
- * - 共用 TreePanel
- * - 布局预设：1/2/4/6/9/12/13/16/25/36/50（一次性提供）
- * - 打开规则：cameraCount <1 不支持；=1 主码流；>=2 主码流 + 右下角画中画（副码流）
- * - 不重复打开设备；满格 toast “没有空闲位置”
- * - 点击主画面/小窗分别打开对应 stream 的视频详情 Overlay
- * - WS：提供 pushStream 请求示例与订阅示例
+ * 视频中心：不规则宫格（CSS Grid 跨行跨列 + gap + 迁移保留）
+ * - 宫格按钮+弹窗（按你给的四行顺序）
+ * - 宫格5：左上2x2大窗 + 右上1格 + 底部3格（中间右侧留空，和参考一致）
+ * - 切换布局：保留已开窗口，不再全部关闭；若新布局容量不足，只保留前 N 个
+ * - 修复底部被挡：grid 使用 minmax(0,1fr) 轨道，box-sizing 边距纳入计算
  */
 import { importTemplate } from '@ui/templateLoader.js';
 import { createTreePanel } from './components/TreePanel.js';
-import { apiDevTypes, apiDevModes, apiGroupedDevices, apiUngroupedDevices } from '@api/deviceApi.js';
+import { apiDevTypes, apiDevModes, apiGroupedDevices } from '@api/deviceApi.js';
 import { createVideoPreview } from './modes/VideoPreview.js';
 import { eventBus } from '@core/eventBus.js';
 import { wsHub } from '@core/hub.js';
 
-const PRESETS = [1,2,4,6,9,12,13,16,25,36,50];
+/* 四行顺序 */
+const PRESET_ROWS = [
+  ['1','2','4','6u'],
+  ['5','6s','7','8'],
+  ['9','10','12','13'],
+  ['16','25','36','50']
+];
 
-let root=null, left=null, splitter=null, grid=null, presetsEl=null, tree=null;
-let deviceMap = new Map(); // devId -> { userInfo, devInfo }
-let slots = [];            // 按当前容量生成的槽位
+let root=null, left=null, splitter=null, grid=null, presetsEl=null, tree=null, closeAllBtn=null, layoutBtn=null, layoutPop=null;
+let deviceMap = new Map();
+let slots = [];            // 与布局 cell 对应：[{ idx, type, devId, devNo, main, sub, offStatus? }]
 let opened = new Map();    // devId -> slotIndex
+let currentPresetId = '12';
+let __openOrderCache = null;
 
+/* ---------- 布局定义（x,y,w,h，坐标从 1 开始） ---------- */
+const LAYOUTS = {
+  '1' : { cols:1, rows:1, cells:[[1,1,1,1]] },
+  '2' : { cols:2, rows:1, cells:[[1,1,1,1],[2,1,1,1]] },
+  '4' : { cols:2, rows:2, cells:uniform(2,2) },
+
+  // 05：左上 2x2 大窗 + 右侧整列 1x2 高窗 + 底部三格（严格填满右侧整列）
+  '5' : { cols:3, rows:3, cells:[
+    [1,1,2,2],  // 左上大窗
+    [3,1,1,2],  // 右侧整列高窗（填满你标红的整列）
+    [1,3,1,1],[2,3,1,1],[3,3,1,1] // 底部三格
+  ] },
+
+  '6u': { cols:3, rows:2, cells:uniform(3,2) },
+  '6s': { cols:3, rows:3, cells:[[1,1,2,2],[3,1,1,1],[3,2,1,1],[1,3,1,1],[2,3,1,1],[3,3,1,1]] },
+  '7' : { cols:3, rows:3, cells:[[2,1,1,3],[1,1,1,1],[1,2,1,1],[1,3,1,1],[3,1,1,1],[3,2,1,1],[3,3,1,1]] },
+  '8' : { cols:4, rows:4, cells:[[1,1,3,3],[4,1,1,1],[4,2,1,1],[4,3,1,1],[1,4,1,1],[2,4,1,1],[3,4,1,1],[4,4,1,1]] },
+  '9' : { cols:3, rows:3, cells:uniform(3,3) },
+  '10': { cols:5, rows:5, cells:[[1,1,4,4],[5,1,1,1],[5,2,1,1],[5,3,1,1],[5,4,1,1],[1,5,1,1],[2,5,1,1],[3,5,1,1],[4,5,1,1],[5,5,1,1]] },
+  '12': { cols:6, rows:6, cells:[[1,1,5,5],[6,1,1,1],[6,2,1,1],[6,3,1,1],[6,4,1,1],[6,5,1,1],[1,6,1,1],[2,6,1,1],[3,6,1,1],[4,6,1,1],[5,6,1,1],[6,6,1,1]] },
+  '13': { cols:4, rows:4, cells:[[2,2,2,2],[1,1,1,1],[2,1,1,1],[3,1,1,1],[4,1,1,1],[1,2,1,1],[4,2,1,1],[1,3,1,1],[4,3,1,1],[1,4,1,1],[2,4,1,1],[3,4,1,1],[4,4,1,1]] },
+  '16': { cols:4, rows:4, cells:uniform(4,4) },
+  '25': { cols:5, rows:5, cells:uniform(5,5) },
+  '36': { cols:6, rows:6, cells:uniform(6,6) },
+  '50': { cols:10, rows:5, cells:uniform(10,5) }
+};
+function uniform(cols, rows){
+  const arr=[]; for(let y=1;y<=rows;y++) for(let x=1;x<=cols;x++) arr.push([x,y,1,1]); return arr;
+}
+
+/* 面积优先 + 靠中心优先（“一个个打开”的顺序） */
+function orderFromLayout(layout){
+  const cx = (layout.cols+1)/2, cy=(layout.rows+1)/2;
+  return layout.cells
+    .map((c, idx) => {
+      const [x,y,w,h]=c; const area=w*h;
+      const mx=x+(w-1)/2, my=y+(h-1)/2;
+      const d = Math.hypot(mx-cx, my-cy);
+      return { idx, area, d, y, x };
+    })
+    .sort((a,b)=> b.area-a.area || a.d-b.d || a.y-b.y || a.x-b.x)
+    .map(x=>x.idx);
+}
+
+/* ---------------- 生命周期 ---------------- */
 export function mountVideoCenterPage() {
   const main = document.getElementById('mainView');
   main.innerHTML = '';
@@ -28,11 +79,7 @@ export function mountVideoCenterPage() {
   main.style.overflow = 'hidden';
   if (!getComputedStyle(main).position || getComputedStyle(main).position === 'static') main.style.position = 'relative';
 
-  const fit = () => {
-    const top = main.getBoundingClientRect().top;
-    const h = window.innerHeight - top;
-    if (h > 0) main.style.height = h + 'px';
-  };
+  const fit = () => { const top = main.getBoundingClientRect().top; const h = window.innerHeight - top; if (h > 0) main.style.height = h + 'px'; };
   fit(); window.addEventListener('resize', fit);
 
   importTemplate('/modules/features/pages/video-center-page.html', 'tpl-video-center-page')
@@ -43,6 +90,9 @@ export function mountVideoCenterPage() {
       splitter = root.querySelector('#vcSplitter');
       grid = root.querySelector('#vcGrid');
       presetsEl = root.querySelector('#vcPresets');
+      layoutBtn = root.querySelector('#vcLayoutBtn');
+      layoutPop = root.querySelector('#vcLayoutPop');
+      closeAllBtn = root.querySelector('#vcCloseAll');
 
       // 左树
       tree = createTreePanel();
@@ -60,12 +110,19 @@ export function mountVideoCenterPage() {
       left.addEventListener('input', onFilters, true);
       left.addEventListener('change', onFilters, true);
 
-      // 设备点击
+      // 树设备点击
       bindTreeDeviceClick(tree, (devId) => openVideoForDevice(devId));
 
-      // 预设按钮
-      renderPresets(9); // 默认 9 宫格
-      applyPreset(9);
+      // 弹窗+按钮
+      renderPresets(currentPresetId);
+      updateLayoutBtnIcon();
+      layoutBtn?.addEventListener('click', toggleLayoutPop);
+      document.addEventListener('click', (e)=>{ if (!layoutPop) return; if (layoutPop.contains(e.target) || layoutBtn.contains(e.target)) return; hideLayoutPop(); });
+      window.addEventListener('resize', hideLayoutPop);
+      closeAllBtn?.addEventListener('click', closeAllSlots);
+
+      // 默认布局
+      applyPreset(currentPresetId);
 
       // 首屏数据
       await bootstrapData();
@@ -76,42 +133,34 @@ export function mountVideoCenterPage() {
 }
 
 export function unmountVideoCenterPage() {
-  // 清理所有槽位
   for (let i=0;i<slots.length;i++) { try { closeSlot(i); } catch {} }
   slots = []; opened.clear(); deviceMap.clear();
   if (root) { try { root.remove(); } catch {} root = null; }
 }
 
-/* ---------------- 数据加载 ---------------- */
-// 修改函数：bootstrapData
+/* ---------------- 数据加载（固定 4） ---------------- */
 async function bootstrapData() {
   const [typesRes, modesRes] = await Promise.allSettled([ apiDevTypes(), apiDevModes() ]);
   const types = typesRes.status==='fulfilled' ? (typesRes.value||{}) : {};
   const modes = modesRes.status==='fulfilled' ? (modesRes.value||{}) : {};
 
-  // 缓存完整列表（用于“索引 -> 真实ID”的映射）
   const allTypes = Array.isArray(types.devTypeList) ? types.devTypeList : [];
   const allModes = Array.isArray(modes.devModeList) ? modes.devModeList : [];
-  tree.__allTypes = allTypes;
-  tree.__allModes = allModes;
+  tree.__allTypes = allTypes; tree.__allModes = allModes;
 
-  // 视频中心下拉显示：类型仅索引 4；模式仅索引 4
-  const t4 = allTypes[3]; // 第 4 项（索引从 0 开始）
-  const m4 = allModes[3];
+  const t4 = allTypes[3], m4 = allModes[3];
   const vcTypes = t4 ? [{ typeId: 4, typeName: t4.typeName }] : [];
   const vcModes = m4 ? [{ modeId: 4, modeName: m4.modeName }] : [];
 
   try {
     tree.setData({
       devTypes: vcTypes,
-      devModes: vcModes, // setData 会默认加“全部(0)”，下面移除
+      devModes: vcModes,
       groupedDevices: [],
       ungroupedDevices: [],
       expandLevel: 2,
       hideUngrouped: true
     });
-
-    // 模式只保留索引 4（移除“全部(0)”）
     const modeSel = tree.controls?.modeSelect?.();
     if (modeSel) {
       modeSel.innerHTML = vcModes.map(m => `<option value="4">${m.modeName}</option>`).join('');
@@ -123,17 +172,15 @@ async function bootstrapData() {
   await reloadByFilters();
 }
 
-// 修改函数：reloadByFilters
 async function reloadByFilters() {
-  // 直接按索引 4 取真实 ID
   const allTypes = Array.isArray(tree.__allTypes) ? tree.__allTypes : [];
   const allModes = Array.isArray(tree.__allModes) ? tree.__allModes : [];
-  const t4 = allTypes[3];
-  const m4 = allModes[3];
+  const t4 = allTypes[3], m4 = allModes[3];
 
+  const filters = tree.getFilterValues?.() || {};
   const payload = {
-    searchStr: (tree.getFilterValues().searchStr || ''),
-    filterOnline: !!(tree.getFilterValues().filterOnline),
+    searchStr: (filters.searchStr || ''),
+    filterOnline: !!(filters.filterOnline),
     devTypeIdArr: t4 ? [Number(t4.typeId)] : [],
     devModeIdArr: m4 ? [Number(m4.modeId)] : []
   };
@@ -144,84 +191,186 @@ async function reloadByFilters() {
   try {
     tree.setData({
       groupedDevices: grouped.devList || [],
-      ungroupedDevices: [], // 不显示未分组
+      ungroupedDevices: [],
       expandLevel: 2,
       hideUngrouped: true
     });
   } catch {}
 
-  // 索引
   deviceMap.clear();
-  const all = (grouped.devList || []);
-  all.forEach(item => {
+  (grouped.devList || []).forEach(item => {
     const di = item.devInfo || {};
     deviceMap.set(Number(di.id), item);
   });
 }
 
-/* ---------------- 布局 ---------------- */
-function renderPresets(active) {
+/* ---------------- 宫格弹窗 ---------------- */
+function toggleLayoutPop(){
+  if (!layoutPop || !layoutBtn) return;
+  if (layoutPop.classList.contains('show')) { hideLayoutPop(); return; }
+  // 定位到按钮下方
+  const r = layoutBtn.getBoundingClientRect();
+  const rootR = root.getBoundingClientRect();
+  const top = r.bottom - rootR.top + 6; // 6px 间距
+  const left = Math.min(r.left - rootR.left, rootR.width - 560 - 12);
+  layoutPop.style.top = `${top}px`;
+  layoutPop.style.left = `${Math.max(6, left)}px`;
+  layoutPop.classList.add('show');
+}
+function hideLayoutPop(){ try{ layoutPop?.classList.remove('show'); }catch{} }
+
+function updateLayoutBtnIcon(){
+  if (!layoutBtn) return;
+  const layout = LAYOUTS[currentPresetId] || LAYOUTS['12'];
+  layoutBtn.innerHTML = renderIconMini(layout);
+}
+function labelOf(id){
+  if (id==='6u' || id==='6s') return '06';
+  return String(id).padStart(2,'0');
+}
+function renderIconMini(layout){
+  // 主窗：面积最大
+  let primary = 0, maxA=0;
+  layout.cells.forEach((c,i)=>{ const a=c[2]*c[3]; if (a>maxA){ maxA=a; primary=i; } });
+  const top = new Map(); const occ = Array.from({length:layout.rows+1}, ()=>Array(layout.cols+1).fill(-1));
+  layout.cells.forEach((c,i)=>{ const [x,y,w,h]=c; top.set(`${x},${y}`,{i,w,h}); for(let yy=y; yy<y+h; yy++) for(let xx=x; xx<x+w; xx++) occ[yy][xx]=i; });
+  let html = `<table class="ico-t"><tbody>`;
+  for(let y=1;y<=layout.rows;y++){
+    html += `<tr>`;
+    for(let x=1;x<=layout.cols;x++){
+      const t = top.get(`${x},${y}`);
+      if (t){
+        const cls = t.i===primary ? 'ico-td primary' : 'ico-td';
+        html += `<td class="${cls}" colspan="${t.w}" rowspan="${t.h}"></td>`;
+      } else if (occ[y][x] >= 0) {
+        // 被跨越覆盖
+      } else {
+        html += `<td class="ico-td"></td>`;
+      }
+    }
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+  return html;
+}
+
+function renderPresets(activeId) {
+  if (!presetsEl) return;
   presetsEl.innerHTML = '';
-  PRESETS.forEach(n => {
-    const b = document.createElement('button');
-    b.textContent = String(n).padStart(2,'0');
-    if (n===active) b.classList.add('active');
-    b.addEventListener('click', () => {
-      presetsEl.querySelectorAll('button').forEach(x=>x.classList.remove('active'));
-      b.classList.add('active');
-      applyPreset(n);
+  PRESET_ROWS.forEach(row => {
+    row.forEach(id => {
+      const layout = LAYOUTS[id];
+      const b = document.createElement('button');
+      b.title = '选择布局';
+
+      const wrap = document.createElement('div'); wrap.className = 'ico-wrap';
+      wrap.innerHTML = renderIconMini(layout);
+
+      const num = document.createElement('span'); num.className = 'num'; num.textContent = labelOf(id);
+
+      b.appendChild(wrap); b.appendChild(num);
+
+      if (id===activeId) b.classList.add('active');
+      b.addEventListener('click', () => {
+        applyPreset(id);                    // 迁移保留已开
+        updateLayoutBtnIcon();
+        // 激活态
+        presetsEl.querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+        b.classList.add('active');
+        hideLayoutPop();
+      });
+      presetsEl.appendChild(b);
     });
-    presetsEl.appendChild(b);
   });
 }
-function applyPreset(n) {
-  // 计算列数：尽量接近方形
-  let cols = Math.ceil(Math.sqrt(n));
-  // 对常见预设做手工调整以视觉更好
-  if (n===2) cols = 2;
-  if (n===4) cols = 2;
-  if (n===6) cols = 3;
-  if (n===9) cols = 3;
-  if (n===12) cols = 4;
-  if (n===13) cols = 4; // 用 4x4，最后 3 个用作空槽
-  if (n===16) cols = 4;
-  if (n===25) cols = 5;
-  if (n===36) cols = 6;
-  if (n===50) cols = 10;
-  grid.setAttribute('data-cols', String(cols));
 
-  // 生成/收缩槽位
-  const need = n;
+/* 新增：创建单个 cell 的小工厂（供补足格子时使用） */
+function createCell(idx){
+  const cell = document.createElement('div');
+  cell.className = 'vc-cell';
+  cell.setAttribute('data-idx', String(idx));
+  cell.innerHTML = `
+    <div class="vc-hd"><div class="title" id="vcTitle${idx}">空闲</div><button data-close="${idx}" title="关闭">✕</button></div>
+    <div class="vc-bd" id="vcBody${idx}" data-free="1"></div>
+  `;
+  // 交互
+  cell.querySelector('[data-close]').addEventListener('click', (ev)=>{ ev.stopPropagation(); closeSlot(idx); });
+  cell.querySelector('.vc-hd').addEventListener('click', (e) => {
+    if (e.target.closest?.('[data-close]')) return;
+    const slot = slots[idx];
+    if (slot && slot.devId) openDeviceDetailOverlay(slot.devId, slot.devNo);
+  }, true);
+  cell.querySelector('.vc-bd').addEventListener('click', (e) => {
+    const slot = slots[idx]; if (!slot || !slot.devId) return;
+    const targetPip = e.target.closest?.('.vc-pip');
+    if (targetPip) openVideoDetailOverlay(slot.devId, slot.devNo, 'sub');
+    else openVideoDetailOverlay(slot.devId, slot.devNo, 'main');
+  }, true);
+  return cell;
+}
+
+/* 修改：applyPreset —— 不再清空/销毁，改为“就地重排 + 仅增减尾部格子”，保留已开窗口 */
+function applyPreset(id) {
+  const layout = LAYOUTS[id] || LAYOUTS['12'];
+  const need = layout.cells.length;
+
+  // 1) 设置网格轨道（minmax(0,1fr) 防止裁切）
+  grid.style.gridTemplateColumns = `repeat(${layout.cols}, minmax(0,1fr))`;
+  grid.style.gridTemplateRows = `repeat(${layout.rows}, minmax(0,1fr))`;
+
+  // 2) 现有格子数量
   const cur = slots.length;
-  if (cur > need) {
-    for (let i=need;i<cur;i++) closeSlot(i, {removeCell:true});
-    slots.length = need;
-  } else if (cur < need) {
-    for (let i=cur;i<need;i++) {
-      slots.push({ idx:i, type:null, devId:null, devNo:null, main:null, sub:null });
-      const cell = document.createElement('div'); cell.className = 'vc-cell'; cell.setAttribute('data-idx', String(i));
-      cell.innerHTML = `
-        <div class="vc-hd"><div class="title" id="vcTitle${i}">空闲</div><button data-close="${i}" title="关闭">✕</button></div>
-        <div class="vc-bd" id="vcBody${i}" data-free="1"></div>
-      `;
-      grid.appendChild(cell);
-      // 关闭
-      cell.querySelector('[data-close]').addEventListener('click', () => closeSlot(i));
-      // 点击打开详情：主/副分别识别
-      cell.querySelector('.vc-bd').addEventListener('click', (e) => {
-        const slot = slots[i]; if (!slot || !slot.devId) return;
-        const targetPip = e.target.closest?.('.vc-pip');
-        if (targetPip) openVideoDetailOverlay(slot.devId, slot.devNo, 'sub');
-        else openVideoDetailOverlay(slot.devId, slot.devNo, 'main');
-      }, true);
+
+  // 3) 若需要更多格子：尾部补齐，但不动已有 DOM（播放器不受影响）
+  if (cur < need) {
+    for (let i=cur; i<need; i++) {
+      slots.push({ idx:i, type:null, devId:null, devNo:null, main:null, sub:null, offStatus:null });
+      grid.appendChild(createCell(i));
     }
   }
+
+  // 4) 将前 need 个格子就地重排到新布局位置（不清 DOM，不搬播放器）
+  for (let i=0; i<need; i++) {
+    const [x,y,w,h] = layout.cells[i];
+    const cell = grid.querySelector(`.vc-cell[data-idx="${i}"]`);
+    if (!cell) continue; // 理论不会发生
+    cell.style.gridColumn = `${x} / span ${w}`;
+    cell.style.gridRow = `${y} / span ${h}`;
+  }
+
+  // 5) 若新容量变小：关闭并移除“尾部超出的格子”
+  if (cur > need) {
+    for (let i=cur-1; i>=need; i--) {
+      // 超出的格子若开着，需要先关掉
+      if (slots[i] && slots[i].type) { try { closeSlot(i); } catch {} }
+      // 移除 DOM 与槽对象
+      try { grid.querySelector(`.vc-cell[data-idx="${i}"]`)?.remove(); } catch {}
+      slots.pop();
+    }
+  }
+
+  // 6) 更新状态
+  currentPresetId = id;
+  __openOrderCache = orderFromLayout(layout);
+}
+
+/* 用于在容量变小且必须关闭时，安全关闭某个旧槽对象（不依赖 DOM 仍在不在） */
+function safeCloseSlotObject(s){
+  try { s.main?.destroy?.(); } catch {}
+  try { s.sub?.destroy?.(); } catch {}
+  if (s.offStatus) { try { s.offStatus(); } catch {} }
+  if (s.devId != null) opened.delete(s.devId);
 }
 
 /* ---------------- 打开/关闭 ---------------- */
 function findFreeSlot() {
-  for (let i=0;i<slots.length;i++) {
-    if (!slots[i].type) return i;
+  const layout = LAYOUTS[currentPresetId] || LAYOUTS['12'];
+  const order = __openOrderCache || orderFromLayout(layout);
+  for (const idx of order) {
+    const s = slots[idx];
+    const body = document.getElementById('vcBody'+idx);
+    const isFreeDom = body && body.getAttribute('data-free') !== '0';
+    if (s && !s.type && isFreeDom) return idx;
   }
   return -1;
 }
@@ -238,18 +387,13 @@ async function openVideoForDevice(devId) {
   const di = item.devInfo || {};
   const devNo = di.no || '';
   const cameraCount = Math.max(0, Number(di?.hardwareInfo?.cameraCount) || 0);
-
-  if (cameraCount < 1) {
-    eventBus.emit('toast:show', { type:'warn', message:'设备不支持打开视频' });
-    return;
-  }
+  if (cameraCount < 1) { eventBus.emit('toast:show', { type:'warn', message:'设备不支持打开视频' }); return; }
 
   const body = document.getElementById('vcBody'+slotIdx);
   const title = document.getElementById('vcTitle'+slotIdx);
 
-  // 主码流
   const main = createVideoPreview({ objectFit:'fill' });
-  body.innerHTML = ''; body.appendChild(main);
+  body.innerHTML=''; body.appendChild(main);
   body.setAttribute('data-free','0');
   title.textContent = `${devNo} 视频（主码流）`;
 
@@ -260,7 +404,6 @@ async function openVideoForDevice(devId) {
   slots[slotIdx].sub = null;
   opened.set(devId, slotIdx);
 
-  // 画中画（副码流）
   if (cameraCount >= 2) {
     const pipWrap = document.createElement('div');
     pipWrap.className = 'vc-pip';
@@ -272,17 +415,9 @@ async function openVideoForDevice(devId) {
   }
 
   try {
-    // 示例：固定 URL（如需按设备定制，请改为你的拼装规则）
     await main.play('webrtc://media.szdght.com/1/camera_audio');
-    if (slots[slotIdx].sub) {
-      await slots[slotIdx].sub.play('webrtc://media.szdght.com/1/camera_audio_sub');
-    }
-    // WS 示例：向设备发起推流请求（按你的后端协议调整 cmd/to）
-    // wsHub.request({ cmd:'pushStream', to:{ type:1, id: Number(devId) }, data:{ stream: (cameraCount>=2?'main+sub':'main') } }).catch(()=>{});
-    // 订阅状态变更（示例）
-    // const off = wsHub.onMatch({ 'to.id': String(devId) }, msg => { /* 根据 msg 更新 UI */ });
-    // slots[slotIdx].offStatus = off;
-  } catch (e) {
+    if (slots[slotIdx].sub) await slots[slotIdx].sub.play('webrtc://media.szdght.com/1/camera_audio_sub');
+  } catch(e) {
     eventBus.emit('toast:show', { type:'error', message:'拉流失败' });
     closeSlot(slotIdx);
   }
@@ -306,7 +441,9 @@ function closeSlot(idx, opts = {}) {
   if (devId != null) opened.delete(devId);
 }
 
-/* ---------------- Overlay（与 DataCenter/ SitePage 同思路） ---------------- */
+function closeAllSlots(){ for (let i=0;i<slots.length;i++) { try { closeSlot(i); } catch {} } }
+
+/* ---------------- Overlay ---------------- */
 let __overlay = null;
 function ensureOverlay() {
   if (__overlay && document.body.contains(__overlay.host)) return __overlay;
@@ -357,6 +494,7 @@ function openOverlay(url, params){
 }
 function closeOverlay(){ if(!__overlay) return; try{ for (const un of __overlay.chUnsub.values()) { try{ un(); }catch{} } __overlay.chUnsub.clear?.(); }catch{}; __overlay.host.style.display='none'; try{ __overlay.iframe.src='about:blank'; }catch{} }
 function openVideoDetailOverlay(devId, devNo, stream){ openOverlay('/modules/features/pages/details/video-detail.html', { devId, devNo, stream: stream||'main' }); }
+function openDeviceDetailOverlay(devId, devNo){ openOverlay('/modules/features/pages/details/device-detail.html', { devId, devNo }); }
 
 /* ---------------- 工具 ---------------- */
 function debounce(fn, wait){ let t; return function(){ const a=arguments; clearTimeout(t); t=setTimeout(()=>fn.apply(null,a), wait||300); }; }
