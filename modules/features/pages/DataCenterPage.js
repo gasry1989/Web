@@ -178,7 +178,9 @@ async function reloadByFilters() {
   });
 }
  
-
+function openDeviceDetailOverlay(devId, devNo) {
+  openOverlay('/modules/features/pages/details/device-detail.html', { devId, devNo });
+}
 /* ---------------- 行管理 ---------------- */
 function openDeviceRow(devId) {
   devId = Number(devId);
@@ -214,8 +216,15 @@ function openDeviceRow(devId) {
   `;
   listEl.appendChild(row);
 
+  const header = row.querySelector('.dc-row-hd');
   const body = row.querySelector('.dc-row-bd');
   const closeBtn = row.querySelector('[data-close]');
+
+  // 新增：标题栏点击 -> 设备详情
+  header.addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-close]')) return; // 排除点 X
+    openDeviceDetailOverlay(devId, devNo);
+  });
 
   // 依据后端顺序：取 devInfo.modeList 的前 1~3 个，且仅保留前端已支持的模式（1/2/3）
   const allow = new Set(PREF_MODES);
@@ -233,7 +242,7 @@ function openDeviceRow(devId) {
     cell.appendChild(label);
 
     const inst = createModeComponent(mid, devId);
-    cell.appendChild(inst.el || inst);
+    cell.appendChild((inst && (inst.el || inst)) || document.createTextNode(''));
 
     // 覆盖层用于点击打开详情
     const clickLayer = document.createElement('div');
@@ -241,11 +250,11 @@ function openDeviceRow(devId) {
     clickLayer.addEventListener('click', () => openModeDetailOverlay(devId, devNo, mid));
     cell.appendChild(clickLayer);
 
-    try { inst.start?.(); } catch {}
+    try { inst && inst.start && inst.start(); } catch {}
 
     // 订阅 WS（示例：匹配 to.id / modeId）
     const unsub = wsHub.onMatch({ 'to.id': String(devId), 'modeId': String(mid) }, msg => {
-      try { inst.setData?.(msg.data); } catch {}
+      try { inst && inst.setData && inst.setData(msg.data); } catch {}
     });
 
     body.appendChild(cell);
@@ -254,7 +263,7 @@ function openDeviceRow(devId) {
 
   // 行状态
   const cleanup = () => {
-    comps.forEach(c => { try { c.unsub?.(); } catch {} try { c.inst?.destroy?.(); } catch {} });
+    comps.forEach(c => { try { c.unsub && c.unsub(); } catch {} try { c.inst && c.inst.destroy && c.inst.destroy(); } catch {} });
     try { row.remove(); } catch {}
     opened.delete(devId);
   };
