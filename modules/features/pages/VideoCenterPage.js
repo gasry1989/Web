@@ -1,9 +1,7 @@
 /**
  * 视频中心：不规则宫格（CSS Grid 跨行跨列 + gap + 迁移保留）
- * - 宫格按钮+弹窗（按你给的四行顺序）
- * - 宫格5：左上2x2大窗 + 右上1格 + 底部3格（中间右侧留空，和参考一致）
- * - 切换布局：保留已开窗口，不再全部关闭；若新布局容量不足，只保留前 N 个
- * - 修复底部被挡：grid 使用 minmax(0,1fr) 轨道，box-sizing 边距纳入计算
+ * - 树状栏可折叠（与现场页一致，持久化）
+ * - 空窗口仅显示纯黑面板；打开视频后才显示标题栏
  */
 import { importTemplate } from '@ui/templateLoader.js';
 import { createTreePanel } from './components/TreePanel.js';
@@ -11,6 +9,8 @@ import { apiDevTypes, apiDevModes, apiGroupedDevices } from '@api/deviceApi.js';
 import { createVideoPreview } from './modes/VideoPreview.js';
 import { eventBus } from '@core/eventBus.js';
 import { wsHub } from '@core/hub.js';
+
+const KEY_TREE_COLLAPSED = 'ui.videocenter.tree.collapsed';
 
 /* 四行顺序 */
 const PRESET_ROWS = [
@@ -21,6 +21,7 @@ const PRESET_ROWS = [
 ];
 
 let root=null, left=null, splitter=null, grid=null, presetsEl=null, tree=null, closeAllBtn=null, layoutBtn=null, layoutPop=null;
+let treeToggleBtn=null, treeHandleBtn=null;
 let deviceMap = new Map();
 let slots = [];            // 与布局 cell 对应：[{ idx, type, devId, devNo, main, sub, offStatus? }]
 let opened = new Map();    // devId -> slotIndex
@@ -35,9 +36,9 @@ const LAYOUTS = {
 
   // 05：左上 2x2 大窗 + 右侧整列 1x2 高窗 + 底部三格（严格填满右侧整列）
   '5' : { cols:3, rows:3, cells:[
-    [1,1,2,2],  // 左上大窗
-    [3,1,1,2],  // 右侧整列高窗（填满你标红的整列）
-    [1,3,1,1],[2,3,1,1],[3,3,1,1] // 底部三格
+    [1,1,2,2],
+    [3,1,1,2],
+    [1,3,1,1],[2,3,1,1],[3,3,1,1]
   ] },
 
   '6u': { cols:3, rows:2, cells:uniform(3,2) },
@@ -93,11 +94,22 @@ export function mountVideoCenterPage() {
       layoutBtn = root.querySelector('#vcLayoutBtn');
       layoutPop = root.querySelector('#vcLayoutPop');
       closeAllBtn = root.querySelector('#vcCloseAll');
+      treeToggleBtn = root.querySelector('#vcTreeToggle');
+      treeHandleBtn = root.querySelector('#vcTreeHandle');
 
       // 左树
       tree = createTreePanel();
       left.appendChild(tree);
       try { await tree.whenReady?.(); } catch {}
+
+      // 折叠状态
+      const initCollapsed = loadCollapsed();
+      applyLeftCollapsed(initCollapsed);
+      treeToggleBtn.addEventListener('click', () => {
+        const next = !left.classList.contains('collapsed');
+        applyLeftCollapsed(next); saveCollapsed(next);
+      });
+      treeHandleBtn.addEventListener('click', () => { applyLeftCollapsed(false); saveCollapsed(false); });
 
       // 分隔条
       initSplitter(left, splitter);
@@ -284,13 +296,14 @@ function renderPresets(activeId) {
   });
 }
 
-/* 新增：创建单个 cell 的小工厂（供补足格子时使用） */
+/* 新增：创建单个 cell 的小工厂（默认空窗：隐藏标题栏） */
 function createCell(idx){
   const cell = document.createElement('div');
   cell.className = 'vc-cell';
   cell.setAttribute('data-idx', String(idx));
+  cell.setAttribute('aria-empty','1'); // 空窗：隐藏标题栏
   cell.innerHTML = `
-    <div class="vc-hd"><div class="title" id="vcTitle${idx}">空闲</div><button data-close="${idx}" title="关闭">✕</button></div>
+    <div class="vc-hd"><div class="title" id="vcTitle${idx}"></div><button data-close="${idx}" title="关闭">✕</button></div>
     <div class="vc-bd" id="vcBody${idx}" data-free="1"></div>
   `;
   // 交互
@@ -309,19 +322,15 @@ function createCell(idx){
   return cell;
 }
 
-/* 修改：applyPreset —— 不再清空/销毁，改为“就地重排 + 仅增减尾部格子”，保留已开窗口 */
+/* 应用布局：CSS Grid + 迁移保留（不销毁播放器）；空窗默认隐藏标题栏 */
 function applyPreset(id) {
   const layout = LAYOUTS[id] || LAYOUTS['12'];
   const need = layout.cells.length;
 
-  // 1) 设置网格轨道（minmax(0,1fr) 防止裁切）
   grid.style.gridTemplateColumns = `repeat(${layout.cols}, minmax(0,1fr))`;
   grid.style.gridTemplateRows = `repeat(${layout.rows}, minmax(0,1fr))`;
 
-  // 2) 现有格子数量
   const cur = slots.length;
-
-  // 3) 若需要更多格子：尾部补齐，但不动已有 DOM（播放器不受影响）
   if (cur < need) {
     for (let i=cur; i<need; i++) {
       slots.push({ idx:i, type:null, devId:null, devNo:null, main:null, sub:null, offStatus:null });
@@ -329,27 +338,22 @@ function applyPreset(id) {
     }
   }
 
-  // 4) 将前 need 个格子就地重排到新布局位置（不清 DOM，不搬播放器）
   for (let i=0; i<need; i++) {
     const [x,y,w,h] = layout.cells[i];
     const cell = grid.querySelector(`.vc-cell[data-idx="${i}"]`);
-    if (!cell) continue; // 理论不会发生
+    if (!cell) continue;
     cell.style.gridColumn = `${x} / span ${w}`;
     cell.style.gridRow = `${y} / span ${h}`;
   }
 
-  // 5) 若新容量变小：关闭并移除“尾部超出的格子”
   if (cur > need) {
     for (let i=cur-1; i>=need; i--) {
-      // 超出的格子若开着，需要先关掉
       if (slots[i] && slots[i].type) { try { closeSlot(i); } catch {} }
-      // 移除 DOM 与槽对象
       try { grid.querySelector(`.vc-cell[data-idx="${i}"]`)?.remove(); } catch {}
       slots.pop();
     }
   }
 
-  // 6) 更新状态
   currentPresetId = id;
   __openOrderCache = orderFromLayout(layout);
 }
@@ -389,6 +393,7 @@ async function openVideoForDevice(devId) {
   const cameraCount = Math.max(0, Number(di?.hardwareInfo?.cameraCount) || 0);
   if (cameraCount < 1) { eventBus.emit('toast:show', { type:'warn', message:'设备不支持打开视频' }); return; }
 
+  const cell = grid.querySelector(`.vc-cell[data-idx="${slotIdx}"]`);
   const body = document.getElementById('vcBody'+slotIdx);
   const title = document.getElementById('vcTitle'+slotIdx);
 
@@ -396,6 +401,7 @@ async function openVideoForDevice(devId) {
   body.innerHTML=''; body.appendChild(main);
   body.setAttribute('data-free','0');
   title.textContent = `${devNo} 视频（主码流）`;
+  if (cell) cell.setAttribute('aria-empty','0'); // 显示标题栏
 
   slots[slotIdx].type = 'video';
   slots[slotIdx].devId = devId;
@@ -430,13 +436,15 @@ function closeSlot(idx, opts = {}) {
   try { s.sub?.destroy?.(); } catch {}
   if (s.offStatus) { try { s.offStatus(); } catch {} }
   s.type = null; s.devId=null; s.devNo=null; s.main=null; s.sub=null;
+  const cell = grid.querySelector(`.vc-cell[data-idx="${idx}"]`);
   const body = document.getElementById('vcBody'+idx);
   const title = document.getElementById('vcTitle'+idx);
   if (opts.removeCell) {
     try { grid.querySelector(`.vc-cell[data-idx="${idx}"]`)?.remove(); } catch {}
   } else {
     if (body) { body.innerHTML=''; body.setAttribute('data-free','1'); }
-    if (title) title.textContent = '空闲';
+    if (title) title.textContent = '';
+    if (cell) cell.setAttribute('aria-empty','1'); // 恢复“纯黑面板”
   }
   if (devId != null) opened.delete(devId);
 }
@@ -495,6 +503,30 @@ function openOverlay(url, params){
 function closeOverlay(){ if(!__overlay) return; try{ for (const un of __overlay.chUnsub.values()) { try{ un(); }catch{} } __overlay.chUnsub.clear?.(); }catch{}; __overlay.host.style.display='none'; try{ __overlay.iframe.src='about:blank'; }catch{} }
 function openVideoDetailOverlay(devId, devNo, stream){ openOverlay('/modules/features/pages/details/video-detail.html', { devId, devNo, stream: stream||'main' }); }
 function openDeviceDetailOverlay(devId, devNo){ openOverlay('/modules/features/pages/details/device-detail.html', { devId, devNo }); }
+
+/* ---------------- 树折叠 ---------------- */
+function applyLeftCollapsed(flag){
+  const toggle = document.getElementById('vcTreeToggle');
+  const handle = document.getElementById('vcTreeHandle');
+  if (!left || !root || !toggle || !handle) return;
+  if (flag) {
+    if (!left.dataset.prevW) {
+      const w = left.getBoundingClientRect().width; if (w>0) left.dataset.prevW = w+'px';
+    }
+    left.classList.add('collapsed');
+    root.classList.add('left-collapsed');
+    toggle.textContent = '»'; toggle.title = '展开树状栏';
+    handle.textContent = '»'; handle.title = '展开树状栏';
+  } else {
+    left.classList.remove('collapsed');
+    root.classList.remove('left-collapsed');
+    toggle.textContent = '«'; toggle.title = '折叠树状栏';
+    handle.textContent = '«'; handle.title = '折叠树状栏';
+    left.style.width = left.dataset.prevW || '320px';
+  }
+}
+function loadCollapsed(){ try{ return localStorage.getItem(KEY_TREE_COLLAPSED) === '1'; } catch { return false; } }
+function saveCollapsed(v){ try{ localStorage.setItem(KEY_TREE_COLLAPSED, v?'1':'0'); } catch {} }
 
 /* ---------------- 工具 ---------------- */
 function debounce(fn, wait){ let t; return function(){ const a=arguments; clearTimeout(t); t=setTimeout(()=>fn.apply(null,a), wait||300); }; }

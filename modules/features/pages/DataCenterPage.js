@@ -1,14 +1,11 @@
 /**
  * DataCenterPage
- * - 共用 TreePanel 筛选
- * - 右侧最多 20 行，每行展示“该设备支持的前 1~3 种模式缩略图”（不显示不支持的占位卡）
- * - 点击支持的模式 -> 打开对应模式详情 Overlay（含 WS 桥）
- * - WS：对已打开模式建立 onMatch 订阅（不影响本地模拟）
- * - 新增：全局本地模拟（所有已打开设备与模式，每 300ms 推一帧 0~12 探头数据）
+ * - 左侧树支持折叠/展开（与现场页一致，持久化）
+ * - 其余逻辑保持不变：模式预览 + WS 模拟喂数
  */
 import { importTemplate } from '@ui/templateLoader.js';
 import { createTreePanel } from './components/TreePanel.js';
-import { apiDevTypes, apiDevModes, apiGroupedDevices, apiUngroupedDevices } from '@api/deviceApi.js';
+import { apiDevTypes, apiDevModes, apiGroupedDevices } from '@api/deviceApi.js';
 import { eventBus } from '@core/eventBus.js';
 import { wsHub } from '@core/hub.js';
 import { createModeTilt } from './modes/ModeTilt.js';
@@ -16,15 +13,16 @@ import { createModeDispTilt } from './modes/ModeDispTilt.js';
 import { createModeAudio } from './modes/ModeAudio.js';
 
 const MAX_ROWS = 20;
-// 仅前端已支持的模式组件（用于与 devInfo.modeList 做交集；顺序以后端 modeList 为准）
 const PREF_MODES = [1,2,3];
 
-// ---- 模拟数据：300ms 推一帧 ----
 const MOCK_INTERVAL_MS = 300;
 const mockState = new Map(); // key: `${devId}|${modeId}` -> state
 let mockTimer = null;
 
+const KEY_TREE_COLLAPSED = 'ui.datacenter.tree.collapsed';
+
 let root = null, left = null, splitter = null, listEl = null, tree = null;
+let treeToggleBtn = null, treeHandleBtn = null;
 let deviceMap = new Map(); // devId -> { userInfo, devInfo }
 let opened = new Map();    // devId -> { row, comps:[{mid,inst,unsub}], cleanup, devId, devNo }
 
@@ -49,11 +47,22 @@ export function mountDataCenterPage() {
       left = root.querySelector('#dcLeft');
       splitter = root.querySelector('#dcSplitter');
       listEl = root.querySelector('#dcList');
+      treeToggleBtn = root.querySelector('#dcTreeToggle');
+      treeHandleBtn = root.querySelector('#dcTreeHandle');
 
       // 左树
       tree = createTreePanel();
       left.appendChild(tree);
       try { await tree.whenReady?.(); } catch {}
+
+      // 折叠状态
+      const initCollapsed = loadCollapsed();
+      applyLeftCollapsed(initCollapsed);
+      treeToggleBtn.addEventListener('click', () => {
+        const next = !left.classList.contains('collapsed');
+        applyLeftCollapsed(next); saveCollapsed(next);
+      });
+      treeHandleBtn.addEventListener('click', () => { applyLeftCollapsed(false); saveCollapsed(false); });
 
       // 分隔条拖拽
       initSplitter(left, splitter);
@@ -238,8 +247,6 @@ function openDeviceRow(devId) {
     const unsub = wsHub.onMatch({ 'to.id': String(devId), 'modeId': String(mid) }, msg => {
       try { inst.setData?.(msg.data); } catch {}
     });
-    // 发送订阅请求（示例：按你们后端改 cmd/结构）
-    // wsHub.request({ cmd:'subscribeMode', to:{ type:3, id: Number(devId) }, data:{ modeId: mid } }).catch(()=>{});
 
     body.appendChild(cell);
     comps.push({ mid, inst, unsub });
@@ -260,9 +267,35 @@ function createModeComponent(mid, devId) {
   if (mid === 1) return createModeTilt({ devId });
   if (mid === 2) return createModeDispTilt({ devId });
   if (mid === 3) return createModeAudio({ devId });
-  // 理论不会到这里（已在 orderedMids 里过滤）
+  // 理论不会到这里
   return createModeAudio({ devId });
 }
+
+/* ---------------- 左侧树折叠 ---------------- */
+function applyLeftCollapsed(flag){
+  const toggle = document.getElementById('dcTreeToggle');
+  const handle = document.getElementById('dcTreeHandle');
+  if (!left || !root || !toggle || !handle) return;
+
+  if (flag) {
+    if (!left.dataset.prevW) {
+      const w = left.getBoundingClientRect().width;
+      if (w > 0) left.dataset.prevW = w + 'px';
+    }
+    left.classList.add('collapsed');
+    root.classList.add('left-collapsed');
+    toggle.textContent = '»'; toggle.title = '展开树状栏';
+    handle.textContent = '»'; handle.title = '展开树状栏';
+  } else {
+    left.classList.remove('collapsed');
+    root.classList.remove('left-collapsed');
+    toggle.textContent = '«'; toggle.title = '折叠树状栏';
+    handle.textContent = '«'; handle.title = '折叠树状栏';
+    left.style.width = left.dataset.prevW || '320px';
+  }
+}
+function loadCollapsed(){ try{ return localStorage.getItem(KEY_TREE_COLLAPSED) === '1'; } catch (e) { return false; } }
+function saveCollapsed(v){ try{ localStorage.setItem(KEY_TREE_COLLAPSED, v?'1':'0'); } catch (e) {} }
 
 /* ---------------- 本地模拟（所有已打开设备） ---------------- */
 function startMockFeeder() {

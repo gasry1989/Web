@@ -2,9 +2,12 @@
 <html><head><meta charset="utf-8"></head><body>
   <template id="tpl-video-center-page">
     <style>
-      .vc-root{position:absolute;inset:0;display:flex;min-width:0;min-height:0;background:#0d1216;color:#cfd8dc}
-      .vc-left{width:320px;min-width:240px;max-width:50vw;display:flex;flex-direction:column;min-height:0;border-right:1px solid rgba(255,255,255,.08);position:relative;z-index:10;flex:0 0 auto}
+      .vc-root{position:absolute;inset:0;display:flex;min-width:0;min-height:0;background:#0d1216;color:#cfd8dc;overflow-anchor:none}
+      .vc-root.left-collapsed .vc-tree-handle{display:flex;}
+
+      .vc-left{width:320px;min-width:240px;max-width:50vw;display:flex;flex-direction:column;min-height:0;border-right:1px solid rgba(255,255,255,.08);position:relative;z-index:10;flex:0 0 auto;transition:none}
       .vc-left.collapsed{width:0!important;min-width:0!important;border-right:none;overflow:hidden}
+
       .vc-splitter{width:12px;cursor:col-resize;position:relative;z-index:10;background:transparent}
       .vc-splitter:hover{background:rgba(255,255,255,.04)}
       .vc-left.collapsed + .vc-splitter{width:0!important;cursor:default;background:transparent}
@@ -14,6 +17,12 @@
 
       .btn-primary{min-width:90px;height:28px;padding:0 10px;border:1px solid #2b63d6;border-radius:6px;background:#2f80ff;color:#fff;cursor:pointer}
       .btn-primary:hover{background:#3d89ff}
+
+      /* 树折叠按钮（与现场页一致风格） */
+      .vc-tree-toggle{position:absolute;top:6px;right:6px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:#1e272f;color:#cfd8dc;border:1px solid #2b3741;border-radius:4px;cursor:pointer;z-index:30}
+      .vc-tree-toggle:hover{background:#27323a}
+      .vc-tree-handle{position:absolute;top:56px;left:6px;width:24px;height:28px;display:none;align-items:center;justify-content:center;background:#1e272f;color:#cfd8dc;border:1px solid #2b3741;border-radius:4px;cursor:pointer;z-index:40}
+      .vc-tree-handle:hover{background:#27323a}
 
       /* 宫格按钮 + 弹窗 */
       .btn-icon{width:32px;height:32px;border:1px solid #2e3a44;border-radius:6px;background:#1a232b;color:#cfd;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
@@ -60,13 +69,21 @@
       .vc-hd [data-close]{width:20px;height:20px;border:none;background:transparent;color:#ccd;cursor:pointer}
       .vc-hd [data-close]:hover{color:#fff}
 
+      /* 空窗：隐藏标题栏，仅纯黑面板 */
+      .vc-cell[aria-empty="1"] .vc-hd{display:none}
+      .vc-cell[aria-empty="1"] .vc-bd{background:#000}
+
       .vc-pip{position:absolute;right:6px;bottom:6px;width:26%;max-width:40%;min-width:80px;aspect-ratio:16/9;border:2px solid #3a4854;border-radius:4px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
       .vc-pip > *{width:100%;height:100%}
     </style>
 
     <div class="vc-root" id="vcRoot">
-      <div class="vc-left" id="vcLeft"></div>
+      <div class="vc-left" id="vcLeft">
+        <button type="button" id="vcTreeToggle" class="vc-tree-toggle" title="折叠树状栏">«</button>
+      </div>
       <div class="vc-splitter" id="vcSplitter" title="拖动调整左侧宽度"></div>
+
+      <button type="button" id="vcTreeHandle" class="vc-tree-handle" title="展开树状栏">»</button>
 
       <div class="vc-center">
         <div class="vc-toolbar">
