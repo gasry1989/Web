@@ -52,12 +52,43 @@ const LAYOUTS = {
   '16': { cols:4, rows:4, cells:uniform(4,4) },
   '25': { cols:5, rows:5, cells:uniform(5,5) },
   '36': { cols:6, rows:6, cells:uniform(6,6) },
-  '50': { cols:10, rows:5, cells:uniform(10,5) }
+  '50': { cols:11, rows:5, cells: mosaic50() }
 };
 function uniform(cols, rows){
   const arr=[]; for(let y=1;y<=rows;y++) for(let x=1;x<=cols;x++) arr.push([x,y,1,1]); return arr;
 }
+// 新增：50宫格专用布局生成器（按参考图）
+function mosaic50() {
+  const cols = 11, rows = 5;
+  const used = new Set();
+  const mark = (x, y, w, h) => {
+    for (let yy = y; yy < y + h; yy++) {
+      for (let xx = x; xx < x + w; xx++) used.add(xx + ',' + yy);
+    }
+  };
+  const cells = [];
 
+  // 1) 左上大窗 2x2
+  cells.push([1, 1, 2, 2]); mark(1, 1, 2, 2);
+
+  // 2) 顶部并列两块中窗 2x1（紧随大窗右侧）
+  cells.push([3, 1, 2, 1]); mark(3, 1, 2, 1);
+  cells.push([5, 1, 2, 1]); mark(5, 1, 2, 1);
+
+  // 3) 右上竖列两个小窗 1x1
+  cells.push([11, 1, 1, 1]); mark(11, 1, 1, 1);
+  cells.push([11, 2, 1, 1]); mark(11, 2, 1, 1);
+
+  // 4) 其余全部填充 1x1 小窗（不覆盖已占用区域）
+  for (let y = 1; y <= rows; y++) {
+    for (let x = 1; x <= cols; x++) {
+      if (!used.has(x + ',' + y)) cells.push([x, y, 1, 1]);
+    }
+  }
+
+  // cells.length 应为 50
+  return cells;
+}
 /* 面积优先 + 靠中心优先（“一个个打开”的顺序） */
 function orderFromLayout(layout){
   const cx = (layout.cols+1)/2, cy=(layout.rows+1)/2;
