@@ -368,17 +368,15 @@ function safeCloseSlotObject(s){
 
 /* ---------------- 打开/关闭 ---------------- */
 function findFreeSlot() {
-  const layout = LAYOUTS[currentPresetId] || LAYOUTS['12'];
-  const order = __openOrderCache || orderFromLayout(layout);
-  for (const idx of order) {
-    const s = slots[idx];
-    const body = document.getElementById('vcBody'+idx);
+  // 与切换宫格后的排布保持一致：slots 的索引即当前布局 cells 的顺序
+  for (let i = 0; i < slots.length; i++) {
+    const s = slots[i];
+    const body = document.getElementById('vcBody' + i);
     const isFreeDom = body && body.getAttribute('data-free') !== '0';
-    if (s && !s.type && isFreeDom) return idx;
+    if (s && !s.type && isFreeDom) return i;
   }
   return -1;
 }
-
 async function openVideoForDevice(devId) {
   devId = Number(devId);
   if (!deviceMap.has(devId)) { eventBus.emit('toast:show', { type:'warn', message:'找不到设备数据' }); return; }
